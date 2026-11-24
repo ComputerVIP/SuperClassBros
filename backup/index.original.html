@@ -1,0 +1,3307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard — Canvas LMS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.10.1/mqtt.min.js';"></script>
+    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js';"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,300;0,400;0,700;0,900;1,400&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Lato', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+                        serif: ['Playfair Display', 'Georgia', 'serif'],
+                    },
+                    colors: {
+                        canvas: {
+                            text: '#2d3b45',
+                            muted: '#6c757d',
+                            border: '#c7cdd1',
+                            lightBorder: '#e2e6ea',
+                            bg: '#ffffff',
+                            btnBg: '#f5f5f5',
+                            btnHover: '#e8e8e8',
+                            ucasGreen: '#1c5c43',
+                            ucasDark: '#123e2d',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #ffffff;
+            color: #2d3b45;
+            font-family: 'Lato', sans-serif;
+            overflow-x: hidden;
+            margin: 0;
+        }
+
+        /* Subtle Canvas-style scrollbar */
+        ::-webkit-scrollbar {
+            width: 7px;
+            height: 7px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f8f9fa;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #c7cdd1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a5aeb5;
+        }
+
+        /* Course card shadow matching Instructure Canvas */
+        .canvas-card {
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
+            transition: box-shadow 0.2s ease, transform 0.15s ease;
+        }
+        .canvas-card:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
+        }
+
+        /* Secret UCAS Starburst Button inside the 'A' */
+        .secret-atom {
+            cursor: pointer;
+            transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.25s ease;
+        }
+        .secret-atom:hover {
+            transform: scale(1.22) rotate(45deg);
+            filter: drop-shadow(0 0 4px rgba(28, 92, 67, 0.65));
+        }
+        .secret-atom.active-game {
+            animation: spinSlow 6s linear infinite;
+            filter: drop-shadow(0 0 6px rgba(37, 99, 235, 0.8));
+        }
+        @keyframes spinSlow {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        /* Full-viewport Game Overlay Canvas */
+        #ui-tag-canvas {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            z-index: 9990;
+        }
+
+        /* Floating HUD Pill transition */
+        .hud-pill {
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+        }
+        .hud-pill.hidden-hud {
+            transform: translate(-50%, 140%);
+            opacity: 0;
+            pointer-events: none;
+        }
+        .hud-pill.visible-hud {
+            transform: translate(-50%, 0);
+            opacity: 1;
+            pointer-events: auto;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col md:flex-row bg-white text-canvas-text select-none">
+
+    <!-- SECRET GAME OVERLAY CANVAS -->
+    <canvas id="ui-tag-canvas"></canvas>
+
+    <!-- COMPACT BOTTOM-CENTER GAME HUD PILL (Hidden until Secret Button is clicked) -->
+    <div id="game-hud" class="hud-pill hidden-hud fixed bottom-4 left-1/2 z-[9999] flex flex-wrap items-center justify-center gap-2 sm:gap-2.5 px-3.5 py-2 rounded-full bg-[#1f2937]/95 text-white shadow-2xl border border-slate-600/70 backdrop-blur-md text-xs max-w-[96vw]">
+        
+        <!-- Local Player Status & Customization Trigger -->
+        <div id="hud-p1" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-600/30 border border-blue-400/40 transition-all">
+            <span id="p1-color-dot" class="w-2.5 h-2.5 rounded-sm bg-blue-400 inline-block"></span>
+            <span id="p1-label" class="font-bold text-blue-200 max-w-[92px] truncate">Runner</span>
+            <span id="p1-health-label" class="font-mono text-[10px] text-emerald-300" title="Health">HP 100</span>
+            <span id="p1-stamina-label" class="font-mono text-[10px] text-cyan-300" title="Stamina">SP 100</span>
+            <span id="p1-combo-label" class="hidden font-black text-[10px] text-fuchsia-300" title="Combo">COMBO 0</span>
+            <button id="toggle-customizer-btn" title="Customize Name & Color" class="px-1.5 py-0.5 rounded bg-slate-700/90 hover:bg-slate-600 text-[10px] text-slate-200 font-semibold transition cursor-pointer">
+                Style
+            </button>
+            <span class="text-[10px] text-blue-300/90 hidden xl:inline">WASD · <b class="text-white">E</b> Swing · <b class="text-white">C</b> Dash · <b class="text-white">J</b> Combo · <b class="text-white">K</b> Heavy · <b class="text-white">L</b> Guard · <b class="text-white">S</b> Slam</span>
+            <span id="p1-it-tag" class="hidden px-1.5 py-0.2 rounded bg-amber-400 text-slate-950 font-black text-[10px] tracking-wide">IT!</span>
+            <span id="p1-tags" class="ml-1 font-mono font-bold text-white" title="Tags Landed">0</span>
+        </div>
+
+        <!-- ROOM CHAT -->
+        <div id="chat-panel" class="hidden fixed right-4 bottom-20 z-[10000] w-[320px] max-w-[calc(100vw-2rem)] rounded-2xl bg-[#111827]/95 text-white shadow-2xl border border-slate-600 backdrop-blur-md overflow-hidden">
+            <div class="flex items-center justify-between px-3 py-2 border-b border-slate-700">
+                <div>
+                    <div class="font-bold text-sm">Room Chat</div>
+                    <div id="chat-room-label" class="text-[9px] text-emerald-300 font-mono">UCAS-1</div>
+                </div>
+                <span class="flex items-center gap-1 text-[9px] text-emerald-300 font-bold">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    LIVE
+                </span>
+            </div>
+            <div id="chat-messages" class="h-52 overflow-y-auto px-3 py-2 space-y-1.5 text-xs"></div>
+            <form id="chat-form" class="flex gap-2 p-2 border-t border-slate-700">
+                <input id="chat-input" maxlength="120" autocomplete="off" placeholder="Trash talk..." class="min-w-0 flex-1 rounded-lg bg-slate-900 border border-slate-600 px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+                <button type="submit" class="rounded-lg bg-cyan-600 hover:bg-cyan-500 px-3 py-1.5 text-xs font-bold">Send</button>
+            </form>
+        </div>
+
+        <!-- Room & Live Lobby Picker Trigger -->
+        <div id="hud-room-box" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/90 border border-slate-600">
+            <span id="net-status-dot" class="w-2 h-2 rounded-full bg-amber-400 animate-pulse" title="Connecting..."></span>
+            <span class="text-[10px] text-slate-400">Room:</span>
+            <input id="room-code-input" type="text" maxlength="12" value="UCAS-1" title="Type any Room Code and press Enter" class="w-16 bg-slate-900/90 text-emerald-300 font-mono font-bold text-[11px] px-1.5 py-0.5 rounded border border-slate-600 focus:outline-none focus:border-emerald-400 uppercase" />
+            <button id="toggle-lobby-btn" title="Browse & Join Active Rooms" class="px-2 py-0.5 rounded bg-emerald-600/80 hover:bg-emerald-500 text-[10px] text-white font-bold transition cursor-pointer flex items-center gap-1">
+                <span>Lobby</span>
+                <span id="lobby-rooms-count" class="px-1 rounded-full bg-black/30 text-[9px]">1</span>
+            </button>
+            <span id="player-count-badge" class="px-1.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 font-bold text-[10px]" title="Connected Players in Room">
+                1 Online
+            </span>
+        </div>
+
+        <!-- Bot Toggle Button -->
+        <button id="toggle-bot-btn" class="px-2.5 py-1 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-[11px] font-semibold text-emerald-300 transition cursor-pointer flex items-center gap-1.5">
+            <span id="bot-indicator" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            <span id="bot-btn-text">Bot: ON</span>
+        </button>
+
+        <!-- Respawn Button -->
+        <button id="respawn-btn" title="Respawn Runner" class="p-1.5 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-200 transition cursor-pointer">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        </button>
+
+        <!-- Exit Game Button -->
+        <button id="exit-game-btn" title="Exit UI Tag" class="w-6 h-6 rounded-full bg-rose-500/80 hover:bg-rose-500 text-white font-bold flex items-center justify-center transition cursor-pointer">
+            ×
+        </button>
+    </div>
+
+    <!-- PLAYER CUSTOMIZATION POPOVER (Name & Color Picker) -->
+    <div id="customizer-popover" class="hidden fixed bottom-16 left-1/2 -translate-x-1/2 z-[10000] w-[300px] p-3.5 rounded-2xl bg-[#1f2937]/95 text-white shadow-2xl border border-slate-600 backdrop-blur-md text-xs">
+        <div class="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-700">
+            <span class="font-bold text-slate-100">Runner Customization</span>
+            <button id="close-customizer-btn" class="text-slate-400 hover:text-white font-bold text-sm px-1 cursor-pointer">×</button>
+        </div>
+        <div class="space-y-3">
+            <div>
+                <label for="player-name-input" class="block text-[11px] text-slate-300 mb-1">Display Name</label>
+                <div class="flex gap-1.5">
+                    <input id="player-name-input" type="text" maxlength="14" placeholder="Enter your name..." class="flex-1 bg-slate-900 text-white px-2.5 py-1.5 rounded-lg border border-slate-600 focus:outline-none focus:border-blue-400 text-xs" />
+                    <button id="save-name-btn" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold transition cursor-pointer">Save</button>
+                </div>
+            </div>
+            <div>
+                <span class="block text-[11px] text-slate-300 mb-1.5">Runner Color</span>
+                <div id="color-swatch-grid" class="grid grid-cols-5 gap-2"></div>
+            </div>
+            <div class="pt-1 border-t border-slate-700/80 text-[10px] text-slate-400 leading-relaxed">
+                <b class="text-slate-200">Abilities:</b> <span class="text-blue-300">W/Space</span> Double Jump & Wall-Jump · <span class="text-amber-300">E / Shift</span> Swing Hook · <span class="text-emerald-300">C</span> Air Dash · <span class="text-fuchsia-300">J</span> 3-hit combo · <span class="text-orange-300">Hold K</span> Charged Heavy · <span class="text-cyan-300">L</span> Guard · <span class="text-rose-300">S</span> Ground Slam
+            </div>
+        </div>
+    </div>
+
+    <!-- LIVE MULTI-DEVICE ROOM LOBBY PICKER POPOVER -->
+    <div id="lobby-popover" class="hidden fixed bottom-16 left-1/2 -translate-x-1/2 z-[10000] w-[320px] p-3.5 rounded-2xl bg-[#1f2937]/95 text-white shadow-2xl border border-slate-600 backdrop-blur-md text-xs">
+        <div class="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-700">
+            <div class="flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span class="font-bold text-slate-100">Active Lobbies (No Links Needed)</span>
+            </div>
+            <button id="close-lobby-btn" class="text-slate-400 hover:text-white font-bold text-sm px-1 cursor-pointer">×</button>
+        </div>
+        <div id="lobby-list" class="max-h-48 overflow-y-auto space-y-1.5 mb-2.5 pr-0.5">
+            <!-- Populated dynamically with live rooms across devices -->
+        </div>
+        <div class="pt-2 border-t border-slate-700 flex items-center gap-1.5">
+            <input id="new-room-input" type="text" maxlength="12" placeholder="New room name..." class="flex-1 bg-slate-900 text-emerald-300 font-mono uppercase px-2.5 py-1.5 rounded-lg border border-slate-600 focus:outline-none focus:border-emerald-400 text-xs" />
+            <button id="create-room-btn" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition cursor-pointer">Create / Join</button>
+        </div>
+    </div>
+
+    <!-- =====================================================================
+         1. LEFT GLOBAL NAVIGATION SIDEBAR (84px wide on desktop, top bar on mobile)
+         ===================================================================== -->
+    <nav id="global-nav" class="w-full md:w-[84px] bg-white border-b md:border-b-0 md:border-r border-[#e2e6ea] flex md:flex-col items-center justify-between shrink-0 z-20 px-2 md:px-0 py-1.5 md:py-0">
+        
+        <div class="flex md:flex-col items-center w-full overflow-x-auto md:overflow-visible">
+            <!-- Top Left UCAS Logo -->
+            <div data-obstacle="true" class="flex flex-col items-center justify-center py-1.5 md:py-3 px-2 md:w-full shrink-0">
+                <svg class="w-14 h-8" viewBox="0 0 120 62" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <text x="5" y="10" fill="#1c5c43" font-family="Lato, sans-serif" font-size="6.2" font-weight="700" letter-spacing="0.3">UTAH COUNTY ACADEMY OF SCIENCES</text>
+                    <text x="6" y="45" fill="#1c5c43" font-family="Lato, sans-serif" font-size="37" font-weight="900" letter-spacing="-1.5">UCAS</text>
+                    <text x="12" y="56" fill="#2d3b45" font-family="Lato, sans-serif" font-size="5.6" font-weight="700" letter-spacing="0.4">STEM EARLY COLLEGE HIGH SCHOOL</text>
+                </svg>
+            </div>
+
+            <!-- Navigation Items -->
+            <ul class="flex md:flex-col items-center w-full gap-0.5 md:gap-0">
+                <!-- Account -->
+                <li class="w-auto md:w-full">
+                    <button data-nav="Account" class="nav-item w-full py-1.5 md:py-2.5 px-2.5 md:px-1 flex flex-col items-center justify-center text-canvas-muted hover:text-canvas-ucasGreen hover:bg-gray-50 transition cursor-pointer">
+                        <div class="w-7 h-7 rounded-full border border-gray-400 flex items-center justify-center mb-0.5 bg-gray-100">
+                            <svg class="w-4 h-4 text-gray-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
+                        </div>
+                        <span class="text-[11px] font-normal leading-tight">Account</span>
+                    </button>
+                </li>
+
+                <!-- Dashboard (Active State) -->
+                <li class="w-auto md:w-full">
+                    <button data-nav="Dashboard" data-obstacle="true" class="nav-item active-nav w-full py-1.5 md:py-2.5 px-2.5 md:px-1 flex flex-col items-center justify-center bg-[#f4f6f8] border-b-2 md:border-b-0 md:border-l-[3px] border-canvas-ucasGreen text-canvas-ucasGreen transition cursor-pointer">
+                        <svg class="w-6 h-6 mb-0.5" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 14l3-3m-3-7a9 9 0 00-9 9c0 2.2.8 4.2 2.1 5.8h13.8A8.96 8.96 0 0021 13a9 9 0 00-9-9z"/>
+                            <path stroke-linecap="round" d="M12 7v1.5M7.5 11.5H9M16.5 11.5H15"/>
+                        </svg>
+                        <span class="text-[11px] font-bold leading-tight">Dashboard</span>
+                    </button>
+                </li>
+
+                <!-- Courses -->
+                <li class="w-auto md:w-full">
+                    <button data-nav="Courses" class="nav-item w-full py-1.5 md:py-2.5 px-2.5 md:px-1 flex flex-col items-center justify-center text-canvas-ucasGreen hover:bg-gray-50 transition cursor-pointer">
+                        <svg class="w-6 h-6 mb-0.5" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4 19.5A2.5 2.5 0 016.5 17H20"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>
+                            <path stroke-linecap="round" d="M8 7h8M8 11h6"/>
+                        </svg>
+                        <span class="text-[11px] font-normal leading-tight text-canvas-text">Courses</span>
+                    </button>
+                </li>
+
+                <!-- Groups -->
+                <li class="w-auto md:w-full">
+                    <button data-nav="Groups" class="nav-item w-full py-1.5 md:py-2.5 px-2.5 md:px-1 flex flex-col items-center justify-center text-canvas-ucasGreen hover:bg-gray-50 transition cursor-pointer">
+                        <svg class="w-6 h-6 mb-0.5" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+                            <circle cx="9" cy="7" r="4"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
+                        </svg>
+                        <span class="text-[11px] font-normal leading-tight text-canvas-text">Groups</span>
+                    </button>
+                </li>
+
+                <!-- Calendar -->
+                <li class="w-auto md:w-full">
+                    <button data-nav="Calendar" class="nav-item w-full py-1.5 md:py-2.5 px-2.5 md:px-1 flex flex-col items-center justify-center text-canvas-ucasGreen hover:bg-gray-50 transition cursor-pointer">
+                        <svg class="w-6 h-6 mb-0.5" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                            <line x1="16" y1="2" x2="16" y2="6"/>
+                            <line x1="8" y1="2" x2="8" y2="6"/>
+                            <line x1="3" y1="10" x2="21" y2="10"/>
+                            <path d="M8 14h2v2H8zM14 14h2v2h-2zM8 18h2v2H8z"/>
+                        </svg>
+                        <span class="text-[11px] font-normal leading-tight text-canvas-text">Calendar</span>
+                    </button>
+                </li>
+
+                <!-- Inbox -->
+                <li class="w-auto md:w-full">
+                    <button data-nav="Inbox" class="nav-item w-full py-1.5 md:py-2.5 px-2.5 md:px-1 flex flex-col items-center justify-center text-canvas-ucasGreen hover:bg-gray-50 transition cursor-pointer">
+                        <svg class="w-6 h-6 mb-0.5" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+                            <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>
+                            <path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/>
+                        </svg>
+                        <span class="text-[11px] font-normal leading-tight text-canvas-text">Inbox</span>
+                    </button>
+                </li>
+
+                <!-- History -->
+                <li class="w-auto md:w-full">
+                    <button data-nav="History" class="nav-item w-full py-1.5 md:py-2.5 px-2.5 md:px-1 flex flex-col items-center justify-center text-canvas-ucasGreen hover:bg-gray-50 transition cursor-pointer">
+                        <svg class="w-6 h-6 mb-0.5" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="9"/>
+                            <polyline points="12 7 12 12 15 14"/>
+                        </svg>
+                        <span class="text-[11px] font-normal leading-tight text-canvas-text">History</span>
+                    </button>
+                </li>
+
+                <!-- Help -->
+                <li class="w-auto md:w-full">
+                    <button data-nav="Help" class="nav-item w-full py-1.5 md:py-2.5 px-2.5 md:px-1 flex flex-col items-center justify-center text-canvas-ucasGreen hover:bg-gray-50 transition cursor-pointer">
+                        <svg class="w-6 h-6 mb-0.5" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="9"/>
+                            <path stroke-linecap="round" d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/>
+                            <circle cx="12" cy="17" r="0.8" fill="currentColor"/>
+                        </svg>
+                        <span class="text-[11px] font-normal leading-tight text-canvas-text">Help</span>
+                    </button>
+                </li>
+            </ul>
+        </div>
+
+        <!-- Bottom Collapse Arrow & Subtle Discovered Toggle -->
+        <div class="hidden md:flex flex-col items-center gap-2 pb-4 w-full">
+            <button id="discovered-tag-pill" title="Resume UI Tag" class="hidden px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-300 text-[10px] font-bold text-canvas-ucasGreen hover:bg-emerald-100 transition cursor-pointer">
+                ▶ Tag
+            </button>
+            <button id="collapse-nav-btn" title="Minimize Global Navigation" class="p-2 text-canvas-ucasGreen hover:bg-gray-100 rounded transition cursor-pointer">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 5v14M19 12H8m0 0l4-4m-4 4l4 4"/>
+                </svg>
+            </button>
+        </div>
+    </nav>
+
+    <!-- =====================================================================
+         2. CENTER MAIN DASHBOARD CONTENT AREA
+         ===================================================================== -->
+    <main class="flex-1 bg-white px-5 sm:px-8 pt-5 pb-12 overflow-y-auto">
+        <div class="max-w-[1040px]">
+            
+            <!-- Dashboard Header Bar -->
+            <header class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-[#c7cdd1]">
+                <h1 id="page-heading" class="text-[28px] font-normal text-canvas-text tracking-tight leading-none">Dashboard</h1>
+
+                <div class="flex items-center gap-2">
+                    <button id="switch-view-btn" data-obstacle="true" class="px-3.5 py-2 rounded-[4px] bg-canvas-btnBg hover:bg-canvas-btnHover border border-canvas-border text-[13px] text-canvas-text font-normal transition cursor-pointer">
+                        Switch to new dashboard view
+                    </button>
+                    <button id="dashboard-options-btn" data-obstacle="true" title="Dashboard Options" class="p-2 rounded-[4px] hover:bg-gray-100 text-canvas-text transition cursor-pointer">
+                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                            <circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/>
+                        </svg>
+                    </button>
+                </div>
+            </header>
+
+            <!-- 3x2 Course Card Grid -->
+            <section id="course-grid" class="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                
+                <!-- CARD 1: 5th Advisory 11 A - Wishart -->
+                <article data-obstacle="true" class="canvas-card bg-white rounded-[4px] border border-[#c7cdd1] overflow-hidden flex flex-col">
+                    <!-- Banner: Sage Green ADVISORY -->
+                    <div class="relative h-[142px] bg-[#86a689] flex items-center justify-center overflow-hidden border-b border-black/5">
+                        <!-- Subtle woven texture overlay -->
+                        <div class="absolute inset-0 opacity-20" style="background-image: radial-gradient(#2c4a30 1px, transparent 1px); background-size: 8px 8px;"></div>
+                        <span class="font-serif text-[32px] tracking-[0.14em] text-[#3a573e]/80 font-semibold select-none">ADVISORY</span>
+                        <button class="card-menu-btn absolute top-2.5 right-2.5 p-1 rounded-full hover:bg-black/15 text-white transition cursor-pointer" title="Card Options">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                        </button>
+                    </div>
+                    <!-- Card Body -->
+                    <div class="p-3.5 flex-1 flex flex-col justify-between">
+                        <div>
+                            <a href="#course-advisory" class="course-link block text-[13.5px] font-bold text-[#1c5c43] hover:underline truncate">
+                                5th Advisory 11 A - Wishart - 202...
+                            </a>
+                            <div class="text-[12.5px] text-canvas-muted truncate mt-0.5">5th Advisory 11 A - Wishart - ...</div>
+                            <div class="text-[11px] text-canvas-muted truncate mt-0.5">2026/2027 - Utah County Acad. of Scie...</div>
+                        </div>
+                        <!-- Card Footer Action Icons -->
+                        <div class="flex items-center gap-5 pt-3.5 mt-2 text-canvas-muted">
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Announcements">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+                            </button>
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Discussions">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                            </button>
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Files">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- CARD 2: Biology w/lab 1010 CE - Koelling -->
+                <article data-obstacle="true" class="canvas-card bg-white rounded-[4px] border border-[#c7cdd1] overflow-hidden flex flex-col">
+                    <!-- Banner: Deep Plum Biology 1010 Fall -->
+                    <div class="relative h-[142px] bg-gradient-to-br from-[#7c3562] via-[#5e294b] to-[#873d6c] flex flex-col items-center justify-center overflow-hidden border-b border-black/5">
+                        <!-- Subtle cellular SVG pattern -->
+                        <svg class="absolute inset-0 w-full h-full opacity-20" viewBox="0 0 200 100" fill="none">
+                            <circle cx="35" cy="25" r="18" stroke="#f9a8d4" stroke-width="2"/>
+                            <circle cx="165" cy="70" r="24" stroke="#f9a8d4" stroke-width="2"/>
+                            <circle cx="110" cy="18" r="12" stroke="#f9a8d4" stroke-width="1.5"/>
+                        </svg>
+                        <div class="relative text-center leading-tight px-3">
+                            <div class="text-[28px] font-bold text-[#e598c8] tracking-wide drop-shadow-sm">Biology</div>
+                            <div class="text-[25px] font-bold text-[#e598c8] tracking-wide drop-shadow-sm">1010 Fall</div>
+                        </div>
+                        <button class="card-menu-btn absolute top-2.5 right-2.5 p-1 rounded-full hover:bg-black/15 text-white transition cursor-pointer" title="Card Options">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                        </button>
+                    </div>
+                    <!-- Card Body -->
+                    <div class="p-3.5 flex-1 flex flex-col justify-between">
+                        <div>
+                            <a href="#course-bio" class="course-link block text-[13.5px] font-bold text-[#8a2b61] hover:underline truncate">
+                                Biology w/lab 1010 CE - Koelling ...
+                            </a>
+                            <div class="text-[12.5px] text-canvas-muted truncate mt-0.5">Biology w/lab 1010 CE - Koel...</div>
+                            <div class="text-[11px] text-canvas-muted truncate mt-0.5">2026/2027 - Utah County Acad. of Scie...</div>
+                        </div>
+                        <div class="flex items-center gap-5 pt-3.5 mt-2 text-canvas-muted">
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Announcements">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+                            </button>
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Discussions">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                            </button>
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Assignments">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- CARD 3: English 11A Honors - Wishart -->
+                <article data-obstacle="true" class="canvas-card bg-white rounded-[4px] border border-[#c7cdd1] overflow-hidden flex flex-col">
+                    <!-- Banner: Stacked Vintage Green Books Illustration -->
+                    <div class="relative h-[142px] bg-[#2b6f56] flex items-center justify-center overflow-hidden border-b border-black/5">
+                        <svg class="w-full h-full" viewBox="0 0 280 142" fill="none">
+                            <rect width="280" height="142" fill="#2f765b"/>
+                            <!-- Bottom Book -->
+                            <g transform="rotate(-8 140 105)">
+                                <rect x="42" y="88" width="192" height="28" rx="4" fill="#1e533f" stroke="#143a2b" stroke-width="1.5"/>
+                                <rect x="52" y="92" width="174" height="20" rx="2" fill="#e5e2d5"/>
+                                <line x1="65" y1="88" x2="65" y2="116" stroke="#d4af37" stroke-width="2"/>
+                                <line x1="210" y1="88" x2="210" y2="116" stroke="#d4af37" stroke-width="2"/>
+                            </g>
+                            <!-- Middle Book -->
+                            <g transform="rotate(-11 140 75)">
+                                <rect x="46" y="58" width="186" height="27" rx="4" fill="#235e47" stroke="#143a2b" stroke-width="1.5"/>
+                                <rect x="56" y="62" width="168" height="19" rx="2" fill="#ebe8dc"/>
+                                <line x1="70" y1="58" x2="70" y2="85" stroke="#d4af37" stroke-width="2"/>
+                                <line x1="204" y1="58" x2="204" y2="85" stroke="#d4af37" stroke-width="2"/>
+                            </g>
+                            <!-- Top Book -->
+                            <g transform="rotate(-13 140 44)">
+                                <path d="M52 28 L225 22 L236 46 L60 52 Z" fill="#1b4d3a" stroke="#123628" stroke-width="1.5"/>
+                                <rect x="54" y="45" width="182" height="14" rx="2" fill="#25634b"/>
+                            </g>
+                        </svg>
+                        <button class="card-menu-btn absolute top-2.5 right-2.5 p-1 rounded-full hover:bg-black/15 text-white transition cursor-pointer" title="Card Options">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                        </button>
+                    </div>
+                    <!-- Card Body -->
+                    <div class="p-3.5 flex-1 flex flex-col justify-between">
+                        <div>
+                            <a href="#course-english" class="course-link block text-[13.5px] font-bold text-[#1c5c43] hover:underline truncate">
+                                English 11A Honors - Wishart - 2...
+                            </a>
+                            <div class="text-[12.5px] text-canvas-muted truncate mt-0.5">English 11A Honors - Wishart...</div>
+                            <div class="text-[11px] text-canvas-muted truncate mt-0.5">2026/2027 - Utah County Acad. of Scie...</div>
+                        </div>
+                        <div class="flex items-center gap-5 pt-3.5 mt-2 text-canvas-muted">
+                            <button class="relative hover:text-canvas-text transition cursor-pointer" title="5 Unread Announcements">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+                                <span class="absolute -top-2 -right-2.5 w-4 h-4 rounded-full bg-[#1c5c43] text-white text-[10px] font-bold flex items-center justify-center">5</span>
+                            </button>
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Assignments">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- CARD 4: Speech CE - Paz - 2027-S1 -->
+                <article data-obstacle="true" class="canvas-card bg-white rounded-[4px] border border-[#c7cdd1] overflow-hidden flex flex-col">
+                    <!-- Banner: Deep Navy THE ART OF PUBLIC SPEAKING -->
+                    <div class="relative h-[142px] bg-gradient-to-b from-[#1a4373] via-[#133258] to-[#0b1f38] flex flex-col items-center justify-between py-3 px-3 overflow-hidden border-b border-black/5">
+                        <span class="text-[9.5px] tracking-[0.16em] text-blue-200/80 font-semibold uppercase z-10">THE ART OF PUBLIC SPEAKING</span>
+                        <!-- Soundwave graphic -->
+                        <div class="flex items-center justify-center gap-1 h-14 w-full opacity-60">
+                            <span class="w-1 bg-blue-400/50 h-4 rounded-full"></span>
+                            <span class="w-1 bg-blue-300/70 h-8 rounded-full"></span>
+                            <span class="w-1 bg-sky-300/80 h-12 rounded-full"></span>
+                            <span class="w-1 bg-blue-400/60 h-6 rounded-full"></span>
+                            <span class="w-1 bg-indigo-300/90 h-14 rounded-full"></span>
+                            <span class="w-1 bg-blue-300/70 h-9 rounded-full"></span>
+                            <span class="w-1 bg-sky-400/80 h-11 rounded-full"></span>
+                            <span class="w-1 bg-blue-400/50 h-5 rounded-full"></span>
+                            <span class="w-1 bg-indigo-300/80 h-12 rounded-full"></span>
+                            <span class="w-1 bg-blue-300/60 h-7 rounded-full"></span>
+                            <span class="w-1 bg-sky-300/75 h-10 rounded-full"></span>
+                            <span class="w-1 bg-blue-400/50 h-4 rounded-full"></span>
+                        </div>
+                        <div class="h-1"></div>
+                        <button class="card-menu-btn absolute top-2.5 right-2.5 p-1 rounded-full hover:bg-black/20 text-white transition cursor-pointer" title="Card Options">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                        </button>
+                    </div>
+                    <!-- Card Body -->
+                    <div class="p-3.5 flex-1 flex flex-col justify-between">
+                        <div>
+                            <a href="#course-speech" class="course-link block text-[13.5px] font-bold text-[#14365d] hover:underline truncate">
+                                Speech CE - Paz - 2027-S1
+                            </a>
+                            <div class="text-[12.5px] text-canvas-muted truncate mt-0.5">Speech CE - Paz - 2027-S1</div>
+                            <div class="text-[11px] text-canvas-muted truncate mt-0.5">2026/2027 - Utah County Acad. of Scie...</div>
+                        </div>
+                        <div class="flex items-center gap-5 pt-3.5 mt-2 text-canvas-muted">
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Announcements">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+                            </button>
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Discussions">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- CARD 5: US National Government CE - Ferlo -->
+                <article data-obstacle="true" class="canvas-card bg-white rounded-[4px] border border-[#c7cdd1] overflow-hidden flex flex-col">
+                    <!-- Banner: US Flag & Capitol Dome with We the People -->
+                    <div class="relative h-[142px] bg-gradient-to-r from-[#1d4e89] via-[#2b6cb0] to-[#3182ce] flex items-center justify-between px-4 overflow-hidden border-b border-black/5">
+                        <!-- Subtle stripes background -->
+                        <div class="absolute inset-0 opacity-20" style="background: repeating-linear-gradient(0deg, #ffffff, #ffffff 8px, #b91c1c 8px, #b91c1c 16px);"></div>
+                        <!-- Left Constitution Parchment -->
+                        <div class="relative z-10 bg-[#f4ebd9]/90 px-2.5 py-2 rounded shadow-sm border border-amber-900/20 -rotate-2">
+                            <span class="font-serif italic font-bold text-[15px] text-[#2d2418]">We the People</span>
+                        </div>
+                        <!-- Right Capitol Dome Silhouette -->
+                        <svg class="relative z-10 w-24 h-28 text-white/85 drop-shadow" viewBox="0 0 100 110" fill="currentColor">
+                            <rect x="48" y="8" width="4" height="10"/>
+                            <path d="M42 24 C42 17, 58 17, 58 24 Z"/>
+                            <rect x="40" y="24" width="20" height="8"/>
+                            <path d="M28 52 C28 32, 72 32, 72 52 Z"/>
+                            <rect x="24" y="52" width="52" height="14"/>
+                            <rect x="10" y="66" width="80" height="34"/>
+                            <rect x="20" y="72" width="60" height="28" fill="#1e40af" opacity="0.25"/>
+                        </svg>
+                        <button class="card-menu-btn absolute top-2.5 right-2.5 p-1 rounded-full hover:bg-black/20 text-white transition cursor-pointer z-20" title="Card Options">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                        </button>
+                    </div>
+                    <!-- Card Body -->
+                    <div class="p-3.5 flex-1 flex flex-col justify-between">
+                        <div>
+                            <a href="#course-gov" class="course-link block text-[13.5px] font-bold text-[#1a5296] hover:underline truncate">
+                                US National Government CE - Fer...
+                            </a>
+                            <div class="text-[12.5px] text-canvas-muted truncate mt-0.5">US National Government CE ...</div>
+                            <div class="text-[11px] text-canvas-muted truncate mt-0.5">2026/2027 - Utah County Acad. of Scie...</div>
+                        </div>
+                        <div class="flex items-center gap-5 pt-3.5 mt-2 text-canvas-muted">
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Assignments">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                            </button>
+                            <button class="relative hover:text-canvas-text transition cursor-pointer" title="1 Unread Announcement">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+                                <span class="absolute -top-2 -right-2.5 w-4 h-4 rounded-full bg-[#1c5c43] text-white text-[10px] font-bold flex items-center justify-center">1</span>
+                            </button>
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Discussions">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                            </button>
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Files">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- CARD 6: Web Development II CE - Clark -->
+                <article data-obstacle="true" class="canvas-card bg-white rounded-[4px] border border-[#c7cdd1] overflow-hidden flex flex-col">
+                    <!-- Banner: UTAH VALLEY UVU UNIVERSITY -->
+                    <div class="relative h-[142px] bg-[#7c8a7e] flex flex-col items-center justify-center px-4 overflow-hidden border-b border-black/5">
+                        <!-- Subtle architectural grid lines -->
+                        <div class="w-full border-y border-[#4a5a4d]/50 py-2 text-center">
+                            <div class="text-[11px] font-bold tracking-[0.22em] text-[#3c4b3f]">UTAH VALLEY</div>
+                            <div class="text-[36px] font-black leading-none tracking-tight text-[#435446] my-0.5">UVU</div>
+                            <div class="text-[11px] font-bold tracking-[0.24em] text-[#3c4b3f]">UNIVERSITY</div>
+                        </div>
+                        <button class="card-menu-btn absolute top-2.5 right-2.5 p-1 rounded-full hover:bg-black/15 text-white transition cursor-pointer" title="Card Options">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                        </button>
+                    </div>
+                    <!-- Card Body -->
+                    <div class="p-3.5 flex-1 flex flex-col justify-between">
+                        <div>
+                            <a href="#course-webdev" class="course-link block text-[13.5px] font-bold text-[#394b59] hover:underline truncate">
+                                Web Development II CE - Clark - ...
+                            </a>
+                            <div class="text-[12.5px] text-canvas-muted truncate mt-0.5">Web Development II CE - Cla...</div>
+                            <div class="text-[11px] text-canvas-muted truncate mt-0.5">2026/2027 - Utah County Acad. of Scie...</div>
+                        </div>
+                        <div class="flex items-center gap-5 pt-3.5 mt-2 text-canvas-muted">
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Announcements">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </article>
+
+            </section>
+        </div>
+    </main>
+
+    <!-- =====================================================================
+         3. RIGHT SIDEBAR (280px wide: UCAS Logo + To Do + Recent Feedback)
+         ===================================================================== -->
+    <aside id="right-sidebar" class="w-full lg:w-[290px] bg-white px-5 pt-4 pb-10 shrink-0 border-t lg:border-t-0 border-[#e2e6ea]">
+        
+        <!-- Top Right Institutional Header with SECRET TRIGGER BUTTON -->
+        <div class="flex flex-col items-center justify-center mb-5 pt-1">
+            <div class="relative inline-flex flex-col items-center">
+                <span class="pointer-events-none text-[7px] font-bold tracking-[0.06em] text-canvas-ucasGreen uppercase leading-none mb-0.5">UTAH COUNTY ACADEMY OF SCIENCES</span>
+                <div class="flex items-center font-black text-[42px] leading-[0.88] tracking-[-2px] text-canvas-ucasGreen">
+                    <span class="pointer-events-none">UC</span>
+                    <!-- Stylized 'A' with Secret Clickable Starburst/Atom Icon inside -->
+                    <span class="relative inline-flex items-center justify-center">
+                        <span class="pointer-events-none">A</span>
+                        <button id="secret-ucas-trigger" type="button" title="Launch UI Tag (or press `)" aria-label="UCAS Emblem" class="secret-atom absolute bottom-[2px] z-30 w-6 h-6 rounded-full bg-white/95 flex items-center justify-center text-canvas-ucasGreen focus:outline-none cursor-pointer">
+                            <svg class="pointer-events-none w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 1L14.6 8.8L22.5 9.5L16.3 14.6L18.2 22.3L12 18.1L5.8 22.3L7.7 14.6L1.5 9.5L9.4 8.8L12 1Z"/>
+                            </svg>
+                        </button>
+                    </span>
+                    <span class="pointer-events-none">S</span>
+                </div>
+                <span class="pointer-events-none text-[6.8px] font-bold tracking-[0.05em] text-canvas-text uppercase mt-1">STEM EARLY COLLEGE HIGH SCHOOL</span>
+            </div>
+        </div>
+
+        <!-- TO DO SECTION -->
+        <div class="mb-6">
+            <h2 class="text-[15px] font-bold text-canvas-text pb-2 border-b border-[#c7cdd1]">To Do</h2>
+            
+            <ul id="todo-list" class="divide-y divide-transparent mt-2 space-y-2.5">
+                <!-- Item 1 -->
+                <li data-obstacle="true" class="todo-item flex items-start justify-between gap-2 py-1 group rounded hover:bg-gray-50/80 px-1 -mx-1 transition">
+                    <div class="flex items-start gap-2.5 min-w-0">
+                        <!-- Megaphone Icon -->
+                        <svg class="w-4 h-4 text-canvas-muted shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+                        <div class="min-w-0 text-[12px] leading-snug">
+                            <a href="#todo-1" class="todo-link block font-bold text-[#1c5c43] hover:underline truncate">9 November Week's Ag...</a>
+                            <div class="text-canvas-muted truncate">English 11A Honors -</div>
+                            <div class="text-canvas-muted truncate">Wishart - 2027-S1</div>
+                            <div class="text-[11px] text-canvas-muted">Nov 9 at 12:22pm</div>
+                        </div>
+                    </div>
+                    <button class="dismiss-todo text-canvas-text hover:text-black font-bold text-sm leading-none px-1 cursor-pointer" title="Ignore">×</button>
+                </li>
+
+                <!-- Item 2 -->
+                <li data-obstacle="true" class="todo-item flex items-start justify-between gap-2 py-1 group rounded hover:bg-gray-50/80 px-1 -mx-1 transition">
+                    <div class="flex items-start gap-2.5 min-w-0">
+                        <!-- Assignment Icon -->
+                        <svg class="w-4 h-4 text-canvas-muted shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        <div class="min-w-0 text-[12px] leading-snug">
+                            <a href="#todo-2" class="todo-link block font-bold text-[#1c5c43] hover:underline truncate">Ch 7-12 Class Notes</a>
+                            <div class="text-canvas-muted truncate">Speech CE - Paz - 2027-</div>
+                            <div class="text-canvas-muted truncate">S1</div>
+                            <div class="text-[11px] text-canvas-muted">35 points &nbsp;|&nbsp;</div>
+                            <div class="text-[11px] text-canvas-muted">Nov 9 at 11:59pm</div>
+                        </div>
+                    </div>
+                    <button class="dismiss-todo text-canvas-text hover:text-black font-bold text-sm leading-none px-1 cursor-pointer" title="Ignore">×</button>
+                </li>
+
+                <!-- Item 3 -->
+                <li data-obstacle="true" class="todo-item flex items-start justify-between gap-2 py-1 group rounded hover:bg-gray-50/80 px-1 -mx-1 transition">
+                    <div class="flex items-start gap-2.5 min-w-0">
+                        <svg class="w-4 h-4 text-canvas-muted shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        <div class="min-w-0 text-[12px] leading-snug">
+                            <a href="#todo-3" class="todo-link block font-bold text-[#1c5c43] hover:underline truncate">Team Precis: American...</a>
+                            <div class="text-canvas-muted truncate">English 11A Honors -</div>
+                            <div class="text-canvas-muted truncate">Wishart - 2027-S1</div>
+                            <div class="text-[11px] text-canvas-muted">5 points &nbsp;|&nbsp;</div>
+                            <div class="text-[11px] text-canvas-muted">Nov 10 at 11:59pm</div>
+                        </div>
+                    </div>
+                    <button class="dismiss-todo text-canvas-text hover:text-black font-bold text-sm leading-none px-1 cursor-pointer" title="Ignore">×</button>
+                </li>
+
+                <!-- Item 4 -->
+                <li data-obstacle="true" class="todo-item flex items-start justify-between gap-2 py-1 group rounded hover:bg-gray-50/80 px-1 -mx-1 transition">
+                    <div class="flex items-start gap-2.5 min-w-0">
+                        <svg class="w-4 h-4 text-canvas-muted shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        <div class="min-w-0 text-[12px] leading-snug">
+                            <a href="#todo-4" class="todo-link block font-bold text-[#1c5c43] hover:underline truncate">Informative Preparatio...</a>
+                            <div class="text-canvas-muted truncate">Speech CE - Paz - 2027-</div>
+                            <div class="text-canvas-muted truncate">S1</div>
+                            <div class="text-[11px] text-canvas-muted">5 points &nbsp;|&nbsp;</div>
+                            <div class="text-[11px] text-canvas-muted">Nov 13 at 11:58pm</div>
+                        </div>
+                    </div>
+                    <button class="dismiss-todo text-canvas-text hover:text-black font-bold text-sm leading-none px-1 cursor-pointer" title="Ignore">×</button>
+                </li>
+
+                <!-- Item 5 -->
+                <li data-obstacle="true" class="todo-item flex items-start justify-between gap-2 py-1 group rounded hover:bg-gray-50/80 px-1 -mx-1 transition">
+                    <div class="flex items-start gap-2.5 min-w-0">
+                        <svg class="w-4 h-4 text-canvas-muted shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        <div class="min-w-0 text-[12px] leading-snug">
+                            <a href="#todo-5" class="todo-link block font-bold text-[#1c5c43] hover:underline truncate">TED Talk Speech prepar...</a>
+                            <div class="text-canvas-muted truncate">Speech CE - Paz - 2027-</div>
+                            <div class="text-canvas-muted truncate">S1</div>
+                            <div class="text-[11px] text-canvas-muted">5 points &nbsp;|&nbsp;</div>
+                            <div class="text-[11px] text-canvas-muted">Nov 13 at 11:59pm</div>
+                        </div>
+                    </div>
+                    <button class="dismiss-todo text-canvas-text hover:text-black font-bold text-sm leading-none px-1 cursor-pointer" title="Ignore">×</button>
+                </li>
+
+                <!-- Item 6 -->
+                <li data-obstacle="true" class="todo-item flex items-start justify-between gap-2 py-1 group rounded hover:bg-gray-50/80 px-1 -mx-1 transition">
+                    <div class="flex items-start gap-2.5 min-w-0">
+                        <svg class="w-4 h-4 text-canvas-muted shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        <div class="min-w-0 text-[12px] leading-snug">
+                            <a href="#todo-6" class="todo-link block font-bold text-[#1c5c43] hover:underline truncate">The Crucible Extra Cre...</a>
+                            <div class="text-canvas-muted truncate">English 11A Honors -</div>
+                            <div class="text-canvas-muted truncate">Wishart - 2027-S1</div>
+                            <div class="text-[11px] text-canvas-muted">1 points &nbsp;|&nbsp; Closed</div>
+                        </div>
+                    </div>
+                    <button class="dismiss-todo text-canvas-text hover:text-black font-bold text-sm leading-none px-1 cursor-pointer" title="Ignore">×</button>
+                </li>
+
+                <!-- Item 7 -->
+                <li data-obstacle="true" class="todo-item flex items-start justify-between gap-2 py-1 group rounded hover:bg-gray-50/80 px-1 -mx-1 transition">
+                    <div class="flex items-start gap-2.5 min-w-0">
+                        <!-- Quiz Rocket Icon -->
+                        <svg class="w-4 h-4 text-canvas-muted shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.59 14.37a6 6 0 01-5.84 7.38v-4.8m5.84-2.58a14.98 14.98 0 006.16-12.12A14.98 14.98 0 009.631 8.41m5.96 5.96a14.926 14.926 0 01-5.841 2.58m-.119-8.54a6 6 0 00-7.381 5.84h4.8m2.581-5.84a14.927 14.927 0 00-2.58 5.84m2.699 2.7c-.103.021-.207.041-.311.06a15.09 15.09 0 01-2.448-2.448 14.9 14.9 0 01.06-.312m-2.24 2.39a4.493 4.493 0 00-1.757 4.306 4.493 4.493 0 004.306-1.758M16.5 9a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"/></svg>
+                        <div class="min-w-0 text-[12px] leading-snug">
+                            <a href="#todo-7" class="todo-link block font-bold text-[#1c5c43] hover:underline truncate">Week 14 Weekly Quiz</a>
+                            <div class="text-canvas-muted truncate">US National Government</div>
+                            <div class="text-canvas-muted truncate">CE - Ferlo - 2027-S1</div>
+                            <div class="text-[11px] text-canvas-muted">13 points &nbsp;|&nbsp;</div>
+                            <div class="text-[11px] text-canvas-muted">Nov 13 at 11:59pm</div>
+                        </div>
+                    </div>
+                    <button class="dismiss-todo text-canvas-text hover:text-black font-bold text-sm leading-none px-1 cursor-pointer" title="Ignore">×</button>
+                </li>
+            </ul>
+
+            <div class="mt-3 text-center">
+                <button id="show-all-todos-btn" class="text-[12.5px] font-bold text-[#1c5c43] hover:underline cursor-pointer">
+                    Show All
+                </button>
+            </div>
+        </div>
+
+        <!-- RECENT FEEDBACK SECTION -->
+        <div>
+            <h2 class="text-[15px] font-bold text-canvas-text pb-2 border-b border-[#c7cdd1]">Recent Feedback</h2>
+            <div data-obstacle="true" class="mt-2.5 flex items-start gap-2.5 py-1">
+                <svg class="w-4 h-4 text-[#1c5c43] shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                    <polyline points="20 6 9 17 4 12"/>
+                </svg>
+                <div class="text-[12px] leading-snug">
+                    <a href="#feedback-poems" class="feedback-link block font-bold text-[#1c5c43] hover:underline">5 Poems</a>
+                    <div class="text-canvas-muted">Speech CE - Paz - 2027-S1</div>
+                </div>
+            </div>
+        </div>
+
+    </aside>
+
+    <!-- Subtle Canvas Notification Toast -->
+    <div id="canvas-toast" class="fixed top-4 right-4 z-[9995] px-4 py-2.5 rounded-[4px] bg-[#2d3b45] text-white text-[13px] shadow-lg opacity-0 pointer-events-none transition-opacity duration-200">
+        Action completed
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, updateDoc, deleteDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        /**
+         * =========================================================================
+         * 1. CANVAS LMS UI INTERACTIVITY (To-Do Dismissal, Nav, Cards, Toast)
+         * =========================================================================
+         */
+        const canvasToast = document.getElementById('canvas-toast');
+        let toastTimer = null;
+
+        function showCanvasToast(message) {
+            canvasToast.textContent = message;
+            canvasToast.classList.remove('opacity-0');
+            canvasToast.classList.add('opacity-100');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => {
+                canvasToast.classList.remove('opacity-100');
+                canvasToast.classList.add('opacity-0');
+            }, 2400);
+        }
+
+        // Dismiss individual To-Do items (and dynamically update platforms!)
+        const todoList = document.getElementById('todo-list');
+        const initialTodoHTML = todoList.innerHTML;
+
+        todoList.addEventListener('click', (e) => {
+            if (e.target.classList.contains('dismiss-todo')) {
+                const li = e.target.closest('li');
+                if (li) {
+                    li.style.opacity = '0';
+                    li.style.transform = 'translateX(12px)';
+                    li.style.transition = 'all 0.18s ease';
+                    setTimeout(() => {
+                        li.remove();
+                        if (typeof scanDomPlatforms === 'function') scanDomPlatforms();
+                    }, 180);
+                }
+            } else if (e.target.classList.contains('todo-link')) {
+                e.preventDefault();
+                showCanvasToast(`Opening assignment: ${e.target.textContent}`);
+            }
+        });
+
+        // "Show All" restores any dismissed To-Do items
+        document.getElementById('show-all-todos-btn').addEventListener('click', () => {
+            todoList.innerHTML = initialTodoHTML;
+            showCanvasToast('All To-Do items restored');
+            if (typeof scanDomPlatforms === 'function') scanDomPlatforms();
+        });
+
+        // Course links & card menus
+        document.querySelectorAll('.course-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                showCanvasToast(`Loaded course: ${link.textContent.trim()}`);
+            });
+        });
+
+        document.querySelectorAll('.card-menu-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                showCanvasToast('Card color & nickname options');
+            });
+        });
+
+        document.getElementById('switch-view-btn').addEventListener('click', () => {
+            showCanvasToast('Card View is active');
+        });
+
+        // Left Nav switching
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                document.querySelectorAll('.nav-item').forEach(n => {
+                    n.classList.remove('bg-[#f4f6f8]', 'border-b-2', 'md:border-b-0', 'md:border-l-[3px]', 'border-canvas-ucasGreen', 'text-canvas-ucasGreen');
+                });
+                item.classList.add('bg-[#f4f6f8]', 'border-b-2', 'md:border-b-0', 'md:border-l-[3px]', 'border-canvas-ucasGreen', 'text-canvas-ucasGreen');
+                const navName = item.getAttribute('data-nav');
+                document.getElementById('page-heading').textContent = navName;
+                if (navName !== 'Dashboard') {
+                    showCanvasToast(`${navName} drawer opened — click Dashboard to return`);
+                }
+            });
+        });
+
+        /**
+         * =========================================================================
+         * 2. UNLIMITED MULTI-DEVICE MULTIPLAYER + SECRET UI TAG ENGINE
+         * =========================================================================
+         */
+        const secretTrigger = document.getElementById('secret-ucas-trigger');
+        const discoveredPill = document.getElementById('discovered-tag-pill');
+        const gameHud = document.getElementById('game-hud');
+        const exitGameBtn = document.getElementById('exit-game-btn');
+        const respawnBtn = document.getElementById('respawn-btn');
+        const toggleBotBtn = document.getElementById('toggle-bot-btn');
+        const botIndicator = document.getElementById('bot-indicator');
+        const botBtnText = document.getElementById('bot-btn-text');
+
+        const hudP1 = document.getElementById('hud-p1');
+        const p1ColorDot = document.getElementById('p1-color-dot');
+        const p1Label = document.getElementById('p1-label');
+        const p1ItTag = document.getElementById('p1-it-tag');
+        const p1TagsEl = document.getElementById('p1-tags');
+        const p1HealthLabel = document.getElementById('p1-health-label');
+        const p1StaminaLabel = document.getElementById('p1-stamina-label');
+        const p1ComboLabel = document.getElementById('p1-combo-label');
+        const chatPanel = document.getElementById('chat-panel');
+        const chatRoomLabel = document.getElementById('chat-room-label');
+        const chatMessages = document.getElementById('chat-messages');
+        const chatForm = document.getElementById('chat-form');
+        const chatInput = document.getElementById('chat-input');
+
+        const netStatusDot = document.getElementById('net-status-dot');
+        const roomCodeInput = document.getElementById('room-code-input');
+        const toggleLobbyBtn = document.getElementById('toggle-lobby-btn');
+        const lobbyRoomsCount = document.getElementById('lobby-rooms-count');
+        const playerCountBadge = document.getElementById('player-count-badge');
+
+        const toggleCustomizerBtn = document.getElementById('toggle-customizer-btn');
+        const customizerPopover = document.getElementById('customizer-popover');
+        const closeCustomizerBtn = document.getElementById('close-customizer-btn');
+        const playerNameInput = document.getElementById('player-name-input');
+        const saveNameBtn = document.getElementById('save-name-btn');
+        const colorSwatchGrid = document.getElementById('color-swatch-grid');
+
+        const lobbyPopover = document.getElementById('lobby-popover');
+        const closeLobbyBtn = document.getElementById('close-lobby-btn');
+        const lobbyListEl = document.getElementById('lobby-list');
+        const newRoomInput = document.getElementById('new-room-input');
+        const createRoomBtn = document.getElementById('create-room-btn');
+
+        const canvas = document.getElementById('ui-tag-canvas');
+        const ctx = canvas.getContext('2d');
+
+        function escapeChatText(text) {
+            return String(text).replace(/[&<>"']/g, char => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            })[char]);
+        }
+
+        function receiveChatMessage(msg) {
+            if (!msg || msg.room !== currentRoom) return;
+            const name = escapeChatText(msg.senderName || 'Runner');
+            const text = escapeChatText(msg.text || '').slice(0, 120);
+            if (!text) return;
+            const line = document.createElement('div');
+            line.className = 'rounded-lg bg-slate-800/70 px-2 py-1.5 leading-snug';
+            line.innerHTML = `<span class="font-bold text-cyan-300">${name}</span> <span class="text-slate-100">${text}</span>`;
+            chatMessages.appendChild(line);
+            while (chatMessages.children.length > 200) chatMessages.firstElementChild.remove();
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function sendChatMessage(text) {
+            const clean = String(text).trim().slice(0, 120);
+            if (!clean) return;
+            const msg = {
+                type: 'chat',
+                room: currentRoom,
+                senderId: localPlayerId,
+                senderName: getEffectivePlayerName(),
+                text: clean,
+                sentAt: Date.now()
+            };
+            receiveChatMessage(msg);
+            publishWssMessage(msg);
+            broadcastToPeers(msg);
+            if (localChannel) localChannel.postMessage(msg);
+        }
+
+        chatForm.addEventListener('submit', (event) => {
+            event.preventDefault();
+            sendChatMessage(chatInput.value);
+            chatInput.value = '';
+        });
+
+        // 10 Distinct vibrant palettes selectable by any player
+        const PLAYER_PALETTES = [
+            { body: '#2563eb', scarf: '#60a5fa', hat: '#1d4ed8', name: 'Cobalt' },
+            { body: '#e11d48', scarf: '#fb7185', hat: '#be123c', name: 'Crimson' },
+            { body: '#059669', scarf: '#34d399', hat: '#047857', name: 'Emerald' },
+            { body: '#7c3aed', scarf: '#a78bfa', hat: '#6d28d9', name: 'Violet' },
+            { body: '#d97706', scarf: '#fbbf24', hat: '#b45309', name: 'Amber' },
+            { body: '#0891b2', scarf: '#22d3ee', hat: '#0e7490', name: 'Cyan' },
+            { body: '#db2777', scarf: '#f472b6', hat: '#be185d', name: 'Magenta' },
+            { body: '#4f46e5', scarf: '#818cf8', hat: '#4338ca', name: 'Indigo' },
+            { body: '#16a34a', scarf: '#86efac', hat: '#15803d', name: 'Lime' },
+            { body: '#ea580c', scarf: '#fdba74', hat: '#c2410c', name: 'Tangerine' }
+        ];
+
+        function hashString(str) {
+            let h = 0;
+            for (let i = 0; i < str.length; i++) {
+                h = ((h << 5) - h) + str.charCodeAt(i);
+                h |= 0;
+            }
+            return Math.abs(h);
+        }
+
+        // Parse room code from URL query (?room=...) if present, default to UCAS-1
+        const urlParams = new URLSearchParams(window.location.search);
+        let currentRoom = (urlParams.get('room') || 'UCAS-1').toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 12) || 'UCAS-1';
+        roomCodeInput.value = currentRoom;
+
+        let gameActive = false;
+        let botEnabled = true;
+        let botUserManuallyToggled = false;
+        let platforms = [];
+        let solidWalls = [];
+        let particles = [];
+        let afterimages = [];
+        let tagFreezeTimer = 0;
+        let lastFrameTime = 0;
+
+        // Multiplayer networking state
+        const sessionTabId = crypto.randomUUID().slice(0, 8);
+        let localPlayerId = `guest-${sessionTabId}`;
+        let selectedPaletteIndex = hashString(localPlayerId) % PLAYER_PALETTES.length;
+        let myPalette = PLAYER_PALETTES[selectedPaletteIndex];
+        let customDisplayName = '';
+
+        let db = null;
+        let auth = null;
+        let currentUser = null;
+        let roomUnsubscribe = null;
+        let netSyncTimer = 0;
+        let lobbyPulseTimer = 0;
+        const combatFeed = [];
+        const combatTexts = [];
+
+        // Map of all remote players in the current room: id -> interpolated runner object
+        const remotePlayers = new Map();
+
+        // Global directory of active rooms discovered across devices: roomName -> { room, players: Map(id -> {name, color, updatedAt}) }
+        const discoveredLobbies = new Map();
+
+        function getEffectivePlayerName() {
+            const clean = customDisplayName.trim();
+            return clean ? clean : `${myPalette.name} Runner`;
+        }
+
+        function applyLocalPaletteUI() {
+            myPalette = PLAYER_PALETTES[selectedPaletteIndex % PLAYER_PALETTES.length];
+            localRunner.id = localPlayerId;
+            localRunner.bodyColor = myPalette.body;
+            localRunner.scarfColor = myPalette.scarf;
+            localRunner.hatColor = myPalette.hat;
+            p1ColorDot.style.backgroundColor = myPalette.scarf;
+            p1Label.textContent = getEffectivePlayerName();
+            renderColorSwatches();
+        }
+
+        function renderColorSwatches() {
+            if (!colorSwatchGrid) return;
+            colorSwatchGrid.innerHTML = '';
+            PLAYER_PALETTES.forEach((pal, idx) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.title = pal.name;
+                const isSelected = idx === selectedPaletteIndex;
+                btn.className = `w-full h-7 rounded-lg flex items-center justify-center transition cursor-pointer border-2 ${isSelected ? 'border-white scale-105 shadow-md' : 'border-transparent opacity-80 hover:opacity-100'}`;
+                btn.style.backgroundColor = pal.body;
+                btn.innerHTML = isSelected
+                    ? '<span class="w-2 h-2 rounded-full bg-white"></span>'
+                    : `<span class="w-2 h-2 rounded-full" style="background:${pal.scarf}"></span>`;
+                btn.addEventListener('click', () => {
+                    selectedPaletteIndex = idx;
+                    applyLocalPaletteUI();
+                    pushLocalStateToNetwork();
+                    publishLobbyPresence();
+                });
+                colorSwatchGrid.appendChild(btn);
+            });
+        }
+
+        // Responsive, snappy platformer & pendulum swing physics constants
+        const GRAVITY = 1220;
+        const GROUND_ACCEL = 2900;
+        const AIR_ACCEL = 2100;
+        const MAX_VX = 295;
+        const GROUND_FRICTION = 0.80;
+        const AIR_DRAG = 0.96;
+        const JUMP_VEL = -530;
+        const DOUBLE_JUMP_VEL = -475;
+        const COYOTE_TIME_MAX = 0.12;
+        const JUMP_BUFFER_MAX = 0.13;
+        const WALL_SLIDE_MAX_VY = 105;
+        const WALL_JUMP_VX = 340;
+        const WALL_JUMP_VY = -515;
+        const DASH_SPEED = 640;
+        const DASH_DURATION = 0.14;
+        const DASH_COOLDOWN = 0.80;
+        const FAST_FALL_SPEED = 780;
+        const MAX_GRAPPLE_DIST = 410;
+        const SWING_PUMP_FORCE = 880;
+        const SWING_DAMPING = 0.996;
+        const ATTACK_DURATION = 0.18;
+        const ATTACK_COOLDOWN = 0.38;
+        const ATTACK_DAMAGE = 12;
+        const MAX_HEALTH = 100;
+        const MAX_STAMINA = 100;
+
+        const keys = {};
+        const lastTapTime = {
+            KeyA: 0,
+            KeyD: 0,
+            ArrowLeft: 0,
+            ArrowRight: 0
+        };
+
+        // Local controllable runner
+        const localRunner = {
+            id: localPlayerId,
+            x: 240,
+            y: 80,
+            w: 14,
+            h: 18,
+            vx: 0,
+            vy: 0,
+            grounded: false,
+            coyoteTimer: 0,
+            jumpBufferTimer: 0,
+            wallSide: 0,
+            jumpsLeft: 2,
+            dropThroughTimer: 0,
+            fastFalling: false,
+            facing: 1,
+            bodyColor: myPalette.body,
+            scarfColor: myPalette.scarf,
+            hatColor: myPalette.hat,
+            isIt: true,
+            itChangedAt: Date.now(),
+            tagsScored: 0,
+            health: MAX_HEALTH,
+            stamina: MAX_STAMINA,
+            kos: 0,
+            comboCount: 0,
+            comboTimer: 0,
+            blocking: false,
+            chargeTime: 0,
+            attackKind: 'light',
+            attackDamage: ATTACK_DAMAGE,
+            hitFlashTimer: 0,
+            attackTimer: 0,
+            attackCooldown: 0,
+            attackHit: false,
+            walkCycle: 0,
+            dashTimer: 0,
+            dashCooldown: 0,
+            dashDir: 1,
+            grapple: {
+                active: false,
+                ax: 0,
+                ay: 0,
+                length: 0
+            }
+        };
+
+        // Optional local practice Bot when playing solo
+        const practiceBot = {
+            id: 'local-bot',
+            x: 680,
+            y: 80,
+            w: 14,
+            h: 18,
+            vx: 0,
+            vy: 0,
+            grounded: false,
+            coyoteTimer: 0,
+            jumpBufferTimer: 0,
+            wallSide: 0,
+            jumpsLeft: 2,
+            dropThroughTimer: 0,
+            fastFalling: false,
+            facing: -1,
+            bodyColor: '#e11d48',
+            scarfColor: '#fb7185',
+            hatColor: '#be123c',
+            isIt: false,
+            tagsScored: 0,
+            health: MAX_HEALTH,
+            stamina: MAX_STAMINA,
+            kos: 0,
+            comboCount: 0,
+            comboTimer: 0,
+            blocking: false,
+            chargeTime: 0,
+            attackKind: 'light',
+            attackDamage: ATTACK_DAMAGE,
+            hitFlashTimer: 0,
+            attackTimer: 0,
+            attackCooldown: 0,
+            attackHit: false,
+            walkCycle: 0,
+            dashTimer: 0,
+            dashCooldown: 0,
+            dashDir: -1,
+            aiJumpTimer: 0,
+            aiGrappleTimer: 0,
+            grapple: {
+                active: false,
+                ax: 0,
+                ay: 0,
+                length: 0
+            }
+        };
+
+        /**
+         * =========================================================================
+         * 3. CROSS-DEVICE REAL-TIME MULTIPLAYER + GLOBAL LOBBY DISCOVERY
+         * =========================================================================
+         */
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'canvas-lms-ui-tag';
+        const localChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('canvas_ui_tag_p2p') : null;
+
+        // Primary Cross-Device Port-443 WebSocket Pub/Sub Relay
+        let mqttClient = null;
+        let mqttConnected = false;
+        let mqttTopic = '';
+        const GLOBAL_LOBBY_TOPIC = 'ucas/canvas/ui-tag/v2/lobbies';
+
+        const WSS_BROKERS = [
+            'wss://test.mosquitto.org:8081/mqtt',
+            'wss://broker.emqx.io:8084/mqtt',
+            'wss://broker.hivemq.com:8884/mqtt'
+        ];
+        let brokerIndex = 0;
+
+        function teardownWssRelay() {
+            if (mqttClient) {
+                try { mqttClient.end(true); } catch (e) {}
+                mqttClient = null;
+            }
+            mqttConnected = false;
+        }
+
+        function startWssRelay(roomName) {
+            teardownWssRelay();
+            if (typeof mqtt === 'undefined') return;
+
+            const cleanRoom = roomName.toLowerCase().replace(/[^a-z0-9-]/g, '') || 'ucas-1';
+            mqttTopic = `ucas/canvas/ui-tag/v2/room/${cleanRoom}`;
+            const brokerUrl = WSS_BROKERS[brokerIndex % WSS_BROKERS.length];
+
+            netStatusDot.className = 'w-2 h-2 rounded-full bg-amber-400 animate-pulse';
+            netStatusDot.title = 'Connecting Cross-Device WebSocket Relay...';
+
+            try {
+                const client = mqtt.connect(brokerUrl, {
+                    clientId: `ucas_${localPlayerId}_${Math.floor(Math.random() * 10000)}`,
+                    clean: true,
+                    connectTimeout: 5000,
+                    reconnectPeriod: 3000
+                });
+                mqttClient = client;
+
+                client.on('connect', () => {
+                    mqttConnected = true;
+                    netStatusDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+                    netStatusDot.title = `Connected Cross-Device (${roomName})`;
+                    client.subscribe([mqttTopic, GLOBAL_LOBBY_TOPIC], { qos: 0 }, () => {
+                        if (gameActive) {
+                            publishWssMessage({ type: 'state', payload: buildMySyncPayload() });
+                            publishLobbyPresence();
+                        }
+                    });
+                });
+
+                client.on('message', (topic, messageBuffer) => {
+                    try {
+                        const msg = JSON.parse(messageBuffer.toString());
+                        if (topic === GLOBAL_LOBBY_TOPIC) {
+                            handleLobbyHeartbeat(msg);
+                        } else if (topic === mqttTopic) {
+                            handleIncomingNetworkMessage(msg);
+                        }
+                    } catch (e) {}
+                });
+
+                client.on('error', () => {
+                    mqttConnected = false;
+                    brokerIndex++;
+                });
+
+                client.on('close', () => {
+                    mqttConnected = false;
+                });
+            } catch (err) {
+                console.warn('WSS relay fallback:', err);
+            }
+        }
+
+        function publishWssMessage(msg, customTopic = null) {
+            const targetTopic = customTopic || mqttTopic;
+            if (mqttClient && mqttConnected && targetTopic) {
+                try {
+                    mqttClient.publish(targetTopic, JSON.stringify(msg), { qos: 0 });
+                } catch (e) {}
+            }
+        }
+
+        function publishLobbyPresence() {
+            if (!gameActive) return;
+            const pulse = {
+                type: 'lobby-pulse',
+                room: currentRoom,
+                playerId: localPlayerId,
+                playerName: getEffectivePlayerName(),
+                bodyColor: myPalette.body,
+                updatedAt: Date.now()
+            };
+            handleLobbyHeartbeat(pulse);
+            publishWssMessage(pulse, GLOBAL_LOBBY_TOPIC);
+            if (localChannel) {
+                localChannel.postMessage(pulse);
+            }
+        }
+
+        function handleLobbyHeartbeat(msg) {
+            if (!msg || msg.type !== 'lobby-pulse' || !msg.room || !msg.playerId) return;
+            const rName = String(msg.room).toUpperCase();
+            let entry = discoveredLobbies.get(rName);
+            if (!entry) {
+                entry = { room: rName, players: new Map() };
+                discoveredLobbies.set(rName, entry);
+            }
+            entry.players.set(msg.playerId, {
+                name: msg.playerName || 'Runner',
+                color: msg.bodyColor || '#2563eb',
+                updatedAt: Date.now()
+            });
+            pruneAndRenderLobbies();
+        }
+
+        function pruneAndRenderLobbies() {
+            const now = Date.now();
+            // Always keep default UCAS-1 and currentRoom visible in the lobby browser
+            if (!discoveredLobbies.has('UCAS-1')) {
+                discoveredLobbies.set('UCAS-1', { room: 'UCAS-1', players: new Map() });
+            }
+            if (!discoveredLobbies.has(currentRoom)) {
+                discoveredLobbies.set(currentRoom, { room: currentRoom, players: new Map() });
+            }
+
+            for (const [rName, entry] of discoveredLobbies.entries()) {
+                for (const [pid, pInfo] of entry.players.entries()) {
+                    if (now - pInfo.updatedAt > 9000) {
+                        entry.players.delete(pid);
+                    }
+                }
+                if (entry.players.size === 0 && rName !== 'UCAS-1' && rName !== currentRoom) {
+                    discoveredLobbies.delete(rName);
+                }
+            }
+
+            if (lobbyRoomsCount) {
+                lobbyRoomsCount.textContent = discoveredLobbies.size;
+            }
+
+            if (!lobbyListEl || lobbyPopover.classList.contains('hidden')) return;
+
+            const sortedRooms = Array.from(discoveredLobbies.values()).sort((a, b) => {
+                if (a.room === currentRoom) return -1;
+                if (b.room === currentRoom) return 1;
+                return b.players.size - a.players.size;
+            });
+
+            lobbyListEl.innerHTML = '';
+            sortedRooms.forEach((entry) => {
+                const isCurrent = entry.room === currentRoom;
+                const count = entry.players.size;
+                const names = Array.from(entry.players.values()).map(p => p.name).slice(0, 4).join(', ');
+
+                const row = document.createElement('div');
+                row.className = `flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl border transition ${isCurrent ? 'bg-emerald-950/60 border-emerald-500/60' : 'bg-slate-800/80 border-slate-700 hover:border-slate-500'}`;
+
+                const infoCol = document.createElement('div');
+                infoCol.className = 'min-w-0 flex-1';
+                infoCol.innerHTML = `
+                    <div class="flex items-center gap-1.5">
+                        <span class="font-mono font-bold text-emerald-300 text-xs">${entry.room}</span>
+                        <span class="px-1.5 py-0.2 rounded-full bg-slate-700 text-[10px] text-slate-200 font-semibold">${count} ${count === 1 ? 'player' : 'players'}</span>
+                    </div>
+                    <div class="text-[10px] text-slate-400 truncate mt-0.5">${names || 'Empty — ready to join'}</div>
+                `;
+
+                const actionBtn = document.createElement('button');
+                actionBtn.type = 'button';
+                if (isCurrent) {
+                    actionBtn.textContent = 'Joined';
+                    actionBtn.className = 'px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 font-bold text-[10px] border border-emerald-500/40 cursor-default';
+                } else {
+                    actionBtn.textContent = 'Join';
+                    actionBtn.className = 'px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-[10px] transition cursor-pointer';
+                    actionBtn.addEventListener('click', () => {
+                        switchToRoom(entry.room);
+                        lobbyPopover.classList.add('hidden');
+                    });
+                }
+
+                row.appendChild(infoCol);
+                row.appendChild(actionBtn);
+                lobbyListEl.appendChild(row);
+            });
+        }
+
+        function switchToRoom(nextRoomRaw) {
+            const nextRoom = String(nextRoomRaw || '').toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 12) || 'UCAS-1';
+            roomCodeInput.value = nextRoom;
+            if (nextRoom !== currentRoom) {
+                removeLocalPlayerFromRoom();
+                currentRoom = nextRoom;
+                botUserManuallyToggled = false;
+                if (gameActive) {
+                    subscribeToRoom(currentRoom);
+                    publishLobbyPresence();
+                }
+                chatMessages.innerHTML = '';
+                chatRoomLabel.textContent = currentRoom;
+                showCanvasToast(`Joined Room: ${currentRoom}`);
+            }
+            pruneAndRenderLobbies();
+        }
+
+        // Secondary Cross-Device WebRTC P2P Mesh with STUN servers
+        let peerNode = null;
+        let isRoomHost = false;
+        const peerConnections = new Map();
+
+        const PEER_CONFIG = {
+            debug: 0,
+            config: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' }
+                ]
+            }
+        };
+
+        function getRoomHostPeerId(roomName) {
+            const clean = roomName.toLowerCase().replace(/[^a-z0-9-]/g, '');
+            return `ucas-canvas-tag-host-${clean}`;
+        }
+
+        function teardownPeerMesh() {
+            for (const conn of peerConnections.values()) {
+                try { conn.close(); } catch (e) {}
+            }
+            peerConnections.clear();
+            isRoomHost = false;
+            if (peerNode) {
+                try { peerNode.destroy(); } catch (e) {}
+                peerNode = null;
+            }
+        }
+
+        function handleIncomingNetworkMessage(msg) {
+            if (!msg || typeof msg !== 'object') return;
+            if (msg.type === 'lobby-pulse') {
+                handleLobbyHeartbeat(msg);
+                return;
+            }
+            if (msg.type === 'state' && msg.payload) {
+                applyIncomingPlayerData(msg.payload);
+                reconcileItAuthority();
+                updatePlayerCountBadge();
+                updateHud();
+            } else if (msg.type === 'tagged') {
+                if (msg.targetId === localPlayerId && msg.room === currentRoom) {
+                    becomeItFromRemoteTag();
+                }
+            } else if (msg.type === 'hit') {
+                if (msg.targetId === localPlayerId && msg.room === currentRoom) {
+                    takeHit(localRunner, msg.attackerId, msg.damage || ATTACK_DAMAGE);
+                }
+            } else if (msg.type === 'chat') {
+                if (msg.room === currentRoom) {
+                    receiveChatMessage(msg);
+                }
+            } else if (msg.type === 'leave' && msg.id) {
+                remotePlayers.delete(msg.id);
+                updatePlayerCountBadge();
+                updateHud();
+            }
+        }
+
+        function setupDataConnection(conn) {
+            if (!conn) return;
+            conn.on('open', () => {
+                peerConnections.set(conn.peer, conn);
+                netStatusDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+                conn.send({ type: 'state', payload: buildMySyncPayload() });
+                if (isRoomHost) {
+                    const peerList = Array.from(peerConnections.keys());
+                    conn.send({ type: 'peer-list', peers: peerList });
+                    broadcastToPeers({ type: 'peer-list', peers: peerList });
+                }
+            });
+
+            conn.on('data', (msg) => {
+                if (!msg || typeof msg !== 'object') return;
+                if (msg.type === 'peer-list' && Array.isArray(msg.peers)) {
+                    for (const pid of msg.peers) {
+                        if (pid && peerNode && pid !== peerNode.id && !peerConnections.has(pid)) {
+                            const meshConn = peerNode.connect(pid, { reliable: false });
+                            setupDataConnection(meshConn);
+                        }
+                    }
+                    return;
+                }
+                handleIncomingNetworkMessage(msg);
+                if (isRoomHost) {
+                    broadcastToPeers(msg, conn.peer);
+                }
+            });
+
+            const handleClose = () => {
+                peerConnections.delete(conn.peer);
+                for (const [rid, rp] of remotePlayers.entries()) {
+                    if (rp.peerId === conn.peer) {
+                        remotePlayers.delete(rid);
+                    }
+                }
+                updatePlayerCountBadge();
+                updateHud();
+            };
+
+            conn.on('close', handleClose);
+            conn.on('error', handleClose);
+        }
+
+        function broadcastToPeers(message, excludePeerId = null) {
+            for (const [pid, conn] of peerConnections.entries()) {
+                if (pid !== excludePeerId && conn && conn.open) {
+                    try {
+                        conn.send(message);
+                    } catch (e) {}
+                }
+            }
+        }
+
+        function startCrossDeviceP2P(roomName) {
+            teardownPeerMesh();
+            if (typeof Peer === 'undefined') return;
+
+            const hostId = getRoomHostPeerId(roomName);
+            const candidatePeer = new Peer(hostId, PEER_CONFIG);
+            peerNode = candidatePeer;
+
+            candidatePeer.on('open', () => {
+                isRoomHost = true;
+                netStatusDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+            });
+
+            candidatePeer.on('connection', (incomingConn) => {
+                setupDataConnection(incomingConn);
+            });
+
+            candidatePeer.on('error', (err) => {
+                if (err && err.type === 'unavailable-id') {
+                    try { candidatePeer.destroy(); } catch (e) {}
+                    isRoomHost = false;
+                    const clientPeer = new Peer(undefined, PEER_CONFIG);
+                    peerNode = clientPeer;
+
+                    clientPeer.on('open', () => {
+                        netStatusDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+                        const hostConn = clientPeer.connect(hostId, { reliable: false });
+                        setupDataConnection(hostConn);
+                    });
+
+                    clientPeer.on('connection', (incomingConn) => {
+                        setupDataConnection(incomingConn);
+                    });
+                }
+            });
+        }
+
+        async function initMultiplayerBackend() {
+            try {
+                if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                    const firebaseConfig = JSON.parse(__firebase_config);
+                    const app = initializeApp(firebaseConfig);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
+
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+
+                    onAuthStateChanged(auth, (user) => {
+                        if (user) {
+                            currentUser = user;
+                            localPlayerId = `${user.uid.slice(0, 10)}-${sessionTabId}`;
+                            applyLocalPaletteUI();
+                            netStatusDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+                            netStatusDot.title = 'Connected to Global Cloud Relay';
+                            if (gameActive) {
+                                subscribeToRoom(currentRoom);
+                            }
+                        }
+                    });
+                } else {
+                    netStatusDot.className = 'w-2 h-2 rounded-full bg-sky-400';
+                    netStatusDot.title = 'Cross-Device WebSocket & WebRTC Ready';
+                }
+            } catch (err) {
+                console.warn('Cloud relay unavailable, using WSS/WebRTC mesh:', err);
+                netStatusDot.className = 'w-2 h-2 rounded-full bg-sky-400';
+            }
+        }
+
+        // Convert screen coordinates to normalized [0..1] layout space so different screen sizes align!
+        function toNormalizedCoords(px, py) {
+            const w = Math.max(1, canvas.width);
+            const h = Math.max(1, canvas.height);
+            return {
+                nx: Number((px / w).toFixed(4)),
+                ny: Number((py / h).toFixed(4))
+            };
+        }
+
+        function fromNormalizedCoords(nx, ny) {
+            return {
+                px: (nx ?? 0.3) * canvas.width,
+                py: (ny ?? 0.1) * canvas.height
+            };
+        }
+
+        function buildMySyncPayload() {
+            const pos = toNormalizedCoords(localRunner.x, localRunner.y);
+            const gAnchor = localRunner.grapple.active
+                ? toNormalizedCoords(localRunner.grapple.ax, localRunner.grapple.ay)
+                : { nx: 0, ny: 0 };
+
+            return {
+                id: localPlayerId,
+                room: currentRoom,
+                nx: pos.nx,
+                ny: pos.ny,
+                vx: Math.round(localRunner.vx),
+                vy: Math.round(localRunner.vy),
+                facing: localRunner.facing,
+                grounded: localRunner.grounded,
+                isIt: localRunner.isIt,
+                itChangedAt: localRunner.itChangedAt,
+                tagsScored: localRunner.tagsScored,
+                health: localRunner.health,
+                stamina: localRunner.stamina,
+                comboCount: localRunner.comboCount,
+                blocking: localRunner.blocking,
+                attackKind: localRunner.attackKind,
+                attackDamage: localRunner.attackDamage,
+                kos: localRunner.kos,
+                attackActive: localRunner.attackTimer > 0,
+                bodyColor: localRunner.bodyColor,
+                scarfColor: localRunner.scarfColor,
+                hatColor: localRunner.hatColor,
+                label: getEffectivePlayerName(),
+                grappleActive: localRunner.grapple.active,
+                gax: gAnchor.nx,
+                gay: gAnchor.ny,
+                updatedAt: Date.now()
+            };
+        }
+
+        function applyIncomingPlayerData(data) {
+            if (!data || data.id === localPlayerId || data.room !== currentRoom) return;
+            const age = Date.now() - (data.updatedAt || 0);
+            if (age > 12000) {
+                remotePlayers.delete(data.id);
+                return;
+            }
+
+            const screenPos = fromNormalizedCoords(data.nx, data.ny);
+            const screenGrapple = data.grappleActive
+                ? fromNormalizedCoords(data.gax, data.gay)
+                : { px: 0, py: 0 };
+
+            let rp = remotePlayers.get(data.id);
+            if (!rp) {
+                rp = {
+                    id: data.id,
+                    x: screenPos.px,
+                    y: screenPos.py,
+                    targetX: screenPos.px,
+                    targetY: screenPos.py,
+                    w: 14,
+                    h: 18,
+                    vx: data.vx || 0,
+                    vy: data.vy || 0,
+                    facing: data.facing || 1,
+                    grounded: !!data.grounded,
+                    isIt: !!data.isIt,
+                    itChangedAt: data.itChangedAt || 0,
+                    tagsScored: data.tagsScored || 0,
+                    health: data.health ?? MAX_HEALTH,
+                    stamina: data.stamina ?? MAX_STAMINA,
+                    comboCount: data.comboCount || 0,
+                    blocking: !!data.blocking,
+                    attackKind: data.attackKind || 'light',
+                    attackDamage: data.attackDamage || ATTACK_DAMAGE,
+                    chargeTime: 0,
+                    kos: data.kos || 0,
+                    hitFlashTimer: 0,
+                    attackTimer: data.attackActive ? ATTACK_DURATION : 0,
+                    attackHit: false,
+                    bodyColor: data.bodyColor || '#e11d48',
+                    scarfColor: data.scarfColor || '#fb7185',
+                    hatColor: data.hatColor || '#be123c',
+                    label: data.label || 'Runner',
+                    walkCycle: 0,
+                    lastSeen: Date.now(),
+                    grapple: {
+                        active: !!data.grappleActive,
+                        ax: screenGrapple.px,
+                        ay: screenGrapple.py
+                    }
+                };
+                remotePlayers.set(data.id, rp);
+                showCanvasToast(`${rp.label} joined ${currentRoom}!`);
+            } else {
+                rp.targetX = screenPos.px;
+                rp.targetY = screenPos.py;
+                rp.vx = data.vx || 0;
+                rp.vy = data.vy || 0;
+                rp.facing = data.facing || 1;
+                rp.grounded = !!data.grounded;
+                rp.isIt = !!data.isIt;
+                rp.itChangedAt = data.itChangedAt || 0;
+                rp.tagsScored = data.tagsScored || 0;
+                rp.health = data.health ?? rp.health;
+                rp.stamina = data.stamina ?? rp.stamina;
+                rp.comboCount = data.comboCount || 0;
+                rp.blocking = !!data.blocking;
+                rp.attackKind = data.attackKind || 'light';
+                rp.attackDamage = data.attackDamage || ATTACK_DAMAGE;
+                rp.kos = data.kos || rp.kos;
+                if (data.attackActive) rp.attackTimer = ATTACK_DURATION;
+                rp.bodyColor = data.bodyColor || rp.bodyColor;
+                rp.scarfColor = data.scarfColor || rp.scarfColor;
+                rp.hatColor = data.hatColor || rp.hatColor;
+                rp.label = data.label || rp.label;
+                rp.lastSeen = Date.now();
+                rp.grapple.active = !!data.grappleActive;
+                rp.grapple.ax = screenGrapple.px;
+                rp.grapple.ay = screenGrapple.py;
+            }
+        }
+
+        function reconcileItAuthority() {
+            const activeRemotes = Array.from(remotePlayers.values());
+            if (activeRemotes.length === 0) return;
+
+            if (!botUserManuallyToggled && botEnabled) {
+                setBotMode(false, true);
+            }
+
+            const allPlayers = [localRunner, ...activeRemotes];
+            const itPlayers = allPlayers.filter(p => p.isIt);
+
+            if (itPlayers.length === 0) {
+                allPlayers.sort((a, b) => a.id.localeCompare(b.id));
+                if (allPlayers[0].id === localPlayerId) {
+                    localRunner.isIt = true;
+                    localRunner.itChangedAt = Date.now();
+                    updateHud();
+                }
+            } else if (itPlayers.length > 1) {
+                itPlayers.sort((a, b) => (b.itChangedAt || 0) - (a.itChangedAt || 0));
+                if (itPlayers[0].id !== localPlayerId && localRunner.isIt) {
+                    localRunner.isIt = false;
+                    updateHud();
+                }
+            }
+        }
+
+        function updatePlayerCountBadge() {
+            const totalHumans = 1 + remotePlayers.size;
+            playerCountBadge.textContent = `${totalHumans} Online`;
+        }
+
+        function subscribeToRoom(roomName) {
+            if (roomUnsubscribe) {
+                roomUnsubscribe();
+                roomUnsubscribe = null;
+            }
+            remotePlayers.clear();
+            updatePlayerCountBadge();
+
+            startWssRelay(roomName);
+            startCrossDeviceP2P(roomName);
+
+            if (!db || !currentUser) return;
+
+            const playersCol = collection(db, 'artifacts', appId, 'public', 'data', `tag_room_${roomName}`);
+            roomUnsubscribe = onSnapshot(
+                playersCol,
+                (snapshot) => {
+                    const seenIds = new Set();
+                    snapshot.forEach((docSnap) => {
+                        const data = docSnap.data();
+                        if (data && data.id && data.id !== localPlayerId) {
+                            seenIds.add(data.id);
+                            applyIncomingPlayerData(data);
+                        }
+                    });
+                    for (const existingId of remotePlayers.keys()) {
+                        if (!seenIds.has(existingId)) {
+                            remotePlayers.delete(existingId);
+                        }
+                    }
+                    reconcileItAuthority();
+                    updatePlayerCountBadge();
+                    updateHud();
+                },
+                (err) => {
+                    console.warn('Room sync listener warning:', err);
+                }
+            );
+
+            pushLocalStateToNetwork();
+        }
+
+        async function pushLocalStateToNetwork() {
+            if (!gameActive) return;
+            const payload = buildMySyncPayload();
+            const msg = { type: 'state', payload };
+
+            if (localChannel) {
+                localChannel.postMessage(msg);
+            }
+
+            publishWssMessage(msg);
+            broadcastToPeers(msg);
+
+            if (db && currentUser) {
+                try {
+                    const playerDocRef = doc(db, 'artifacts', appId, 'public', 'data', `tag_room_${currentRoom}`, localPlayerId);
+                    await setDoc(playerDocRef, payload);
+                } catch (e) {}
+            }
+        }
+
+        async function removeLocalPlayerFromRoom() {
+            const leaveMsg = { type: 'leave', id: localPlayerId, room: currentRoom };
+            if (localChannel) {
+                localChannel.postMessage(leaveMsg);
+            }
+            publishWssMessage(leaveMsg);
+            broadcastToPeers(leaveMsg);
+            teardownWssRelay();
+            teardownPeerMesh();
+            if (db && currentUser) {
+                try {
+                    const playerDocRef = doc(db, 'artifacts', appId, 'public', 'data', `tag_room_${currentRoom}`, localPlayerId);
+                    await deleteDoc(playerDocRef);
+                } catch (e) {}
+            }
+        }
+
+        if (localChannel) {
+            localChannel.onmessage = (event) => {
+                const msg = event.data;
+                if (!msg) return;
+                handleIncomingNetworkMessage(msg);
+            };
+        }
+
+        function becomeItFromRemoteTag() {
+            if (localRunner.isIt) return;
+            localRunner.isIt = true;
+            localRunner.itChangedAt = Date.now();
+            tagFreezeTimer = 0.55;
+            localRunner.vy = -240;
+            localRunner.grapple.active = false;
+            spawnParticles(localRunner.x + 7, localRunner.y + 9, '#fbbf24', 18);
+            updateHud();
+            pushLocalStateToNetwork();
+        }
+
+        window.addEventListener('beforeunload', () => {
+            if (gameActive) {
+                removeLocalPlayerFromRoom();
+            }
+        });
+
+        // Room switcher input & Lobby Picker UI listeners
+        roomCodeInput.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                switchToRoom(roomCodeInput.value);
+                roomCodeInput.blur();
+            }
+        });
+
+        toggleLobbyBtn.addEventListener('click', () => {
+            customizerPopover.classList.add('hidden');
+            lobbyPopover.classList.toggle('hidden');
+            if (!lobbyPopover.classList.contains('hidden')) {
+                publishLobbyPresence();
+                pruneAndRenderLobbies();
+            }
+        });
+
+        closeLobbyBtn.addEventListener('click', () => {
+            lobbyPopover.classList.add('hidden');
+        });
+
+        createRoomBtn.addEventListener('click', () => {
+            const val = newRoomInput.value.trim();
+            if (val) {
+                switchToRoom(val);
+                newRoomInput.value = '';
+                lobbyPopover.classList.add('hidden');
+            }
+        });
+
+        newRoomInput.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                createRoomBtn.click();
+            }
+        });
+
+        // Customizer Popover UI listeners
+        toggleCustomizerBtn.addEventListener('click', () => {
+            lobbyPopover.classList.add('hidden');
+            customizerPopover.classList.toggle('hidden');
+            if (!customizerPopover.classList.contains('hidden')) {
+                playerNameInput.value = customDisplayName;
+                renderColorSwatches();
+                playerNameInput.focus();
+            }
+        });
+
+        closeCustomizerBtn.addEventListener('click', () => {
+            customizerPopover.classList.add('hidden');
+        });
+
+        saveNameBtn.addEventListener('click', () => {
+            customDisplayName = playerNameInput.value.trim().slice(0, 14);
+            applyLocalPaletteUI();
+            pushLocalStateToNetwork();
+            publishLobbyPresence();
+            customizerPopover.classList.add('hidden');
+            showCanvasToast(`Updated runner name: ${getEffectivePlayerName()}`);
+        });
+
+        playerNameInput.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                saveNameBtn.click();
+            }
+        });
+
+        /**
+         * =========================================================================
+         * 4. INPUT HANDLING (WASD OR ARROWS + SWING + AIR DASH + GROUND SLAM)
+         * =========================================================================
+         */
+        function isTypingInInput() {
+            const el = document.activeElement;
+            return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (isTypingInInput()) return;
+
+            // Instant Backtick (`) shortcut to toggle UI Tag Mode on/off anytime
+            if (e.code === 'Backquote') {
+                e.preventDefault();
+                if (gameActive) {
+                    stopUiTag();
+                } else {
+                    startUiTag();
+                }
+                return;
+            }
+
+            if (!gameActive) return;
+
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Slash'].includes(e.code)) {
+                e.preventDefault();
+            }
+
+            // Double-tap Left/Right detection for quick Air Dash
+            if (!keys[e.code] && (e.code === 'KeyA' || e.code === 'KeyD' || e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
+                const now = performance.now();
+                if (now - lastTapTime[e.code] < 230) {
+                    if (e.code === 'KeyA' || e.code === 'ArrowLeft') triggerDash(localRunner, -1);
+                    if (e.code === 'KeyD' || e.code === 'ArrowRight') triggerDash(localRunner, 1);
+                }
+                lastTapTime[e.code] = now;
+            }
+
+            // Jump / Swing Slingshot Release / Wall-Jump (W, ArrowUp, or Space)
+            if ((e.code === 'KeyW' || e.code === 'ArrowUp' || e.code === 'Space') && !keys[e.code]) {
+                localRunner.jumpBufferTimer = JUMP_BUFFER_MAX;
+                handleJumpInput(localRunner);
+            }
+
+            // Mid-air Ground Slam / Fast-Fall (S or ArrowDown pressed in mid-air while not grappling)
+            if ((e.code === 'KeyS' || e.code === 'ArrowDown') && !keys[e.code]) {
+                if (!localRunner.grounded && !localRunner.grapple.active && localRunner.vy > -180) {
+                    localRunner.fastFalling = true;
+                    localRunner.vy = Math.max(localRunner.vy, FAST_FALL_SPEED);
+                    spawnParticles(localRunner.x + localRunner.w / 2, localRunner.y, localRunner.scarfColor, 6);
+                }
+            }
+
+            // Grapple Hook (E, Q, ShiftLeft, Slash, Enter = diagonal; F or Period = straight up)
+            if ((e.code === 'KeyE' || e.code === 'KeyQ' || e.code === 'ShiftLeft' || e.code === 'Slash' || e.code === 'Enter') && !keys[e.code]) {
+                toggleGrapple(localRunner, false);
+            }
+            if ((e.code === 'KeyF' || e.code === 'Period') && !keys[e.code]) {
+                toggleGrapple(localRunner, true);
+            }
+
+            // Dedicated Air Dash (C, M, or ShiftRight)
+            if ((e.code === 'KeyC' || e.code === 'KeyM' || e.code === 'ShiftRight') && !keys[e.code]) {
+                triggerDash(localRunner, localRunner.facing);
+            }
+
+            // Melee fighting punch (J or X)
+            if ((e.code === 'KeyJ' || e.code === 'KeyX') && !keys[e.code]) {
+                triggerAttack(localRunner);
+            }
+
+            // Charged heavy strike
+            if (e.code === 'KeyK' && !keys[e.code]) {
+                localRunner.chargeTime = 0;
+            }
+
+            // Hold L to guard incoming attacks
+            if (e.code === 'KeyL' && !keys[e.code]) {
+                localRunner.blocking = localRunner.stamina > 0;
+            }
+
+            keys[e.code] = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            keys[e.code] = false;
+
+            if (e.code === 'KeyK') {
+                triggerHeavyAttack(localRunner);
+                localRunner.chargeTime = 0;
+            }
+            if (e.code === 'KeyL') {
+                localRunner.blocking = false;
+            }
+
+            // Variable jump height: releasing Jump early cuts upward velocity for tight short-hops!
+            if ((e.code === 'KeyW' || e.code === 'ArrowUp' || e.code === 'Space') && localRunner.vy < -190 && !localRunner.grapple.active) {
+                localRunner.vy *= 0.56;
+            }
+        });
+
+        function setBotMode(enabled, automatic = false) {
+            botEnabled = enabled;
+            if (!automatic) {
+                botUserManuallyToggled = true;
+            }
+            if (botEnabled) {
+                botIndicator.className = 'w-2 h-2 rounded-full bg-emerald-400';
+                botBtnText.textContent = 'Bot: ON';
+                botBtnText.className = 'text-emerald-300';
+            } else {
+                botIndicator.className = 'w-2 h-2 rounded-full bg-slate-400';
+                botBtnText.textContent = 'Bot: OFF';
+                botBtnText.className = 'text-slate-300';
+            }
+            updateHud();
+        }
+
+        toggleBotBtn.addEventListener('click', () => setBotMode(!botEnabled, false));
+
+        function triggerDash(r, dir) {
+            if (r.dashCooldown > 0 || r.dashTimer > 0) return;
+            if (r.grapple.active) {
+                r.grapple.active = false;
+            }
+            r.fastFalling = false;
+            r.dashDir = dir || r.facing || 1;
+            r.facing = r.dashDir;
+            r.dashTimer = DASH_DURATION;
+            r.dashCooldown = DASH_COOLDOWN;
+            r.vx = r.dashDir * DASH_SPEED;
+            r.vy = -40;
+            spawnParticles(r.x + r.w / 2, r.y + r.h / 2, r.scarfColor, 10);
+        }
+
+        function triggerAttack(r) {
+            if (r.attackCooldown > 0 || r.attackTimer > 0 || r.stamina < 10 || r.blocking) return;
+            r.comboCount = r.comboTimer > 0 ? Math.min(3, r.comboCount + 1) : 1;
+            r.comboTimer = 0.75;
+            r.attackTimer = ATTACK_DURATION;
+            r.attackCooldown = ATTACK_COOLDOWN;
+            r.attackHit = false;
+            r.attackKind = 'light';
+            r.attackDamage = r.comboCount === 3 ? 18 : (r.comboCount === 2 ? 14 : 11);
+            r.stamina = Math.max(0, r.stamina - 9);
+            r.vx *= 0.82;
+            spawnParticles(
+                r.x + r.w / 2 + r.facing * 10,
+                r.y + r.h / 2,
+                r.scarfColor,
+                3
+            );
+        }
+
+        function triggerHeavyAttack(r) {
+            if (r.attackCooldown > 0 || r.attackTimer > 0 || r.stamina < 24 || r.blocking) return;
+            const charge = Math.min(1, r.chargeTime / 0.9);
+            r.attackTimer = 0.28 + charge * 0.12;
+            r.attackCooldown = 0.65;
+            r.attackHit = false;
+            r.attackKind = 'heavy';
+            r.attackDamage = 22 + charge * 18;
+            r.chargeTime = 0;
+            r.stamina = Math.max(0, r.stamina - (24 + charge * 12));
+            r.vx = r.facing * (260 + charge * 180);
+            r.vy = -35;
+            spawnParticles(
+                r.x + r.w / 2 + r.facing * 16,
+                r.y + r.h / 2,
+                charge >= 0.65 ? '#fde68a' : r.scarfColor,
+                8 + Math.round(charge * 10)
+            );
+        }
+
+        function handleJumpInput(r) {
+            // 1. Slingshot release off grappling hook: preserves tangential swing momentum + upward boost!
+            if (r.grapple.active) {
+                r.grapple.active = false;
+                r.jumpBufferTimer = 0;
+                r.fastFalling = false;
+                r.vy = Math.min(r.vy - 210, -450);
+                r.vx *= 1.24;
+                r.jumpsLeft = 1;
+                spawnParticles(r.x + r.w / 2, r.y + r.h / 2, '#fbbf24', 10);
+                return;
+            }
+
+            // 2. Grounded or Coyote-Time normal jump
+            if (r.grounded || r.coyoteTimer > 0) {
+                r.vy = JUMP_VEL;
+                r.grounded = false;
+                r.coyoteTimer = 0;
+                r.jumpBufferTimer = 0;
+                r.fastFalling = false;
+                r.jumpsLeft = 1;
+                spawnParticles(r.x + r.w / 2, r.y + r.h, '#94a3b8', 6);
+                return;
+            }
+
+            // 3. Wall-jump off side of course cards or viewport borders
+            if (r.wallSide !== 0) {
+                r.vx = -r.wallSide * WALL_JUMP_VX;
+                r.vy = WALL_JUMP_VY;
+                r.facing = -r.wallSide;
+                r.wallSide = 0;
+                r.jumpBufferTimer = 0;
+                r.fastFalling = false;
+                r.jumpsLeft = 1;
+                spawnParticles(r.x + (r.facing === 1 ? 0 : r.w), r.y + r.h / 2, '#cbd5e1', 8);
+                return;
+            }
+
+            // 4. Mid-air double jump
+            if (r.jumpsLeft > 0) {
+                r.vy = DOUBLE_JUMP_VEL;
+                r.jumpsLeft = 0;
+                r.jumpBufferTimer = 0;
+                r.fastFalling = false;
+                spawnParticles(r.x + r.w / 2, r.y + r.h, r.scarfColor, 8);
+            }
+        }
+
+        // Raycast against all UI cards, ledges, and ceiling to anchor a grappling hook
+        function toggleGrapple(r, straightUp = false) {
+            if (r.grapple.active) {
+                r.grapple.active = false;
+                return;
+            }
+
+            const ox = r.x + r.w / 2;
+            const oy = r.y + 4;
+
+            let dx = straightUp ? 0 : r.facing * 0.65;
+            let dy = straightUp ? -1 : -0.76;
+            const mag = Math.hypot(dx, dy);
+            dx /= mag;
+            dy /= mag;
+
+            let bestDist = MAX_GRAPPLE_DIST;
+            let hitX = null;
+            let hitY = null;
+
+            const step = 4;
+            for (let d = 18; d <= MAX_GRAPPLE_DIST; d += step) {
+                const px = ox + dx * d;
+                const py = oy + dy * d;
+
+                if (py <= 3 || px <= 3 || px >= canvas.width - 3) {
+                    bestDist = d;
+                    hitX = Math.max(3, Math.min(canvas.width - 3, px));
+                    hitY = Math.max(3, py);
+                    break;
+                }
+
+                let hitBox = false;
+                for (const plat of platforms) {
+                    if (px >= plat.x && px <= plat.x + plat.w && py >= plat.y && py <= plat.y + plat.h) {
+                        bestDist = d;
+                        hitX = px;
+                        hitY = py;
+                        hitBox = true;
+                        break;
+                    }
+                }
+                if (hitBox) break;
+            }
+
+            if (hitX === null) {
+                let bestCornerScore = Infinity;
+                for (const plat of platforms) {
+                    const corners = [
+                        { x: plat.x + 4, y: plat.y + 2 },
+                        { x: plat.x + plat.w - 4, y: plat.y + 2 },
+                        { x: plat.x + plat.w / 2, y: plat.y + 2 }
+                    ];
+                    for (const c of corners) {
+                        const vx = c.x - ox;
+                        const vy = c.y - oy;
+                        const dist = Math.hypot(vx, vy);
+                        if (dist > 24 && dist <= MAX_GRAPPLE_DIST && vy < -10) {
+                            const dot = (vx / dist) * dx + (vy / dist) * dy;
+                            if (dot > 0.68) {
+                                const score = dist * (1.2 - dot);
+                                if (score < bestCornerScore) {
+                                    bestCornerScore = score;
+                                    bestDist = dist;
+                                    hitX = c.x;
+                                    hitY = c.y;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (hitX !== null && hitY !== null) {
+                r.grapple.active = true;
+                r.grapple.ax = hitX;
+                r.grapple.ay = hitY;
+                r.grapple.length = Math.max(24, bestDist * 0.92);
+                r.grounded = false;
+                r.fastFalling = false;
+                r.jumpsLeft = 1;
+                // Give an initial tangential kick if swinging from a near-still drop
+                if (Math.abs(r.vx) < 90) {
+                    r.vx += r.facing * 115;
+                }
+                spawnParticles(hitX, hitY, '#fbbf24', 9);
+            } else {
+                spawnParticles(ox + dx * 65, oy + dy * 65, '#94a3b8', 4);
+            }
+        }
+
+        function resizeGameCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+
+        function scanDomPlatforms() {
+            const list = [];
+            const walls = [];
+            const elements = document.querySelectorAll('[data-obstacle="true"]');
+
+            elements.forEach(el => {
+                if (el.offsetParent === null) return;
+                const rect = el.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                    const isCard = el.classList.contains('canvas-card');
+                    list.push({
+                        x: rect.left,
+                        y: rect.top,
+                        w: rect.width,
+                        h: rect.height,
+                        type: isCard ? 'card' : 'ledge'
+                    });
+
+                    if (isCard) {
+                        walls.push({
+                            x: rect.left,
+                            y: rect.top + 6,
+                            w: rect.width,
+                            h: rect.height - 10
+                        });
+                        list.push({
+                            x: rect.left + 4,
+                            y: rect.bottom - 34,
+                            w: rect.width - 8,
+                            h: 10,
+                            type: 'subledge'
+                        });
+                    }
+                }
+            });
+
+            const headerEl = document.querySelector('header');
+            if (headerEl) {
+                const hRect = headerEl.getBoundingClientRect();
+                list.push({
+                    x: hRect.left,
+                    y: hRect.bottom,
+                    w: hRect.width,
+                    h: 4,
+                    type: 'ledge'
+                });
+            }
+
+            platforms = list;
+            solidWalls = walls;
+        }
+
+        function respawnRunners() {
+            scanDomPlatforms();
+            const spawnOffset = (hashString(localPlayerId) % 5) * 95;
+            localRunner.x = Math.min(180 + spawnOffset, window.innerWidth - 120);
+            localRunner.y = 45;
+            localRunner.vx = 0;
+            localRunner.vy = 0;
+            localRunner.grapple.active = false;
+            localRunner.dashTimer = 0;
+            localRunner.health = MAX_HEALTH;
+            localRunner.stamina = MAX_STAMINA;
+            localRunner.comboCount = 0;
+            localRunner.comboTimer = 0;
+            localRunner.blocking = false;
+            localRunner.chargeTime = 0;
+            localRunner.attackDamage = ATTACK_DAMAGE;
+            localRunner.hitFlashTimer = 0;
+            localRunner.attackTimer = 0;
+            localRunner.attackCooldown = 0;
+
+            practiceBot.x = Math.min(680, window.innerWidth * 0.65);
+            practiceBot.y = 45;
+            practiceBot.vx = 0;
+            practiceBot.vy = 0;
+            practiceBot.grapple.active = false;
+            practiceBot.dashTimer = 0;
+            practiceBot.health = MAX_HEALTH;
+            practiceBot.stamina = MAX_STAMINA;
+            practiceBot.comboCount = 0;
+            practiceBot.comboTimer = 0;
+            practiceBot.blocking = false;
+            practiceBot.chargeTime = 0;
+            practiceBot.attackDamage = ATTACK_DAMAGE;
+            practiceBot.hitFlashTimer = 0;
+            practiceBot.attackTimer = 0;
+            practiceBot.attackCooldown = 0;
+
+            spawnParticles(localRunner.x + 7, localRunner.y + 9, localRunner.bodyColor, 14);
+            pushLocalStateToNetwork();
+        }
+
+        function startUiTag() {
+            gameActive = true;
+            secretTrigger.classList.add('active-game');
+            discoveredPill.classList.remove('hidden');
+            gameHud.classList.remove('hidden-hud');
+            gameHud.classList.add('visible-hud');
+            applyLocalPaletteUI();
+            resizeGameCanvas();
+            respawnRunners();
+            subscribeToRoom(currentRoom);
+            publishLobbyPresence();
+            updateHud();
+            chatPanel.classList.remove('hidden');
+            chatRoomLabel.textContent = currentRoom;
+            lastFrameTime = performance.now();
+            requestAnimationFrame(loop);
+        }
+
+        function stopUiTag() {
+            gameActive = false;
+            customizerPopover.classList.add('hidden');
+            lobbyPopover.classList.add('hidden');
+            removeLocalPlayerFromRoom();
+            if (roomUnsubscribe) {
+                roomUnsubscribe();
+                roomUnsubscribe = null;
+            }
+            secretTrigger.classList.remove('active-game');
+            gameHud.classList.remove('visible-hud');
+            gameHud.classList.add('hidden-hud');
+            chatPanel.classList.add('hidden');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
+        secretTrigger.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (gameActive) {
+                stopUiTag();
+            } else {
+                startUiTag();
+            }
+        });
+
+        discoveredPill.addEventListener('click', () => {
+            if (!gameActive) startUiTag();
+        });
+
+        exitGameBtn.addEventListener('click', stopUiTag);
+        respawnBtn.addEventListener('click', respawnRunners);
+
+        window.addEventListener('resize', () => {
+            if (gameActive) {
+                resizeGameCanvas();
+                scanDomPlatforms();
+            }
+        });
+
+        window.addEventListener('scroll', () => {
+            if (gameActive) {
+                scanDomPlatforms();
+            }
+        }, true);
+
+        function updateHud() {
+            p1TagsEl.textContent = localRunner.tagsScored;
+            p1HealthLabel.textContent = `HP ${Math.max(0, Math.round(localRunner.health))}`;
+            p1HealthLabel.className = localRunner.health > 40
+                ? 'font-mono text-[10px] text-emerald-300'
+                : 'font-mono text-[10px] text-rose-300';
+            p1StaminaLabel.textContent = `SP ${Math.max(0, Math.round(localRunner.stamina))}`;
+            p1StaminaLabel.className = localRunner.stamina > 25
+                ? 'font-mono text-[10px] text-cyan-300'
+                : 'font-mono text-[10px] text-amber-300';
+            if (localRunner.comboCount > 1 && localRunner.comboTimer > 0) {
+                p1ComboLabel.textContent = `COMBO ${localRunner.comboCount}`;
+                p1ComboLabel.classList.remove('hidden');
+            } else {
+                p1ComboLabel.classList.add('hidden');
+            }
+            if (localRunner.isIt) {
+                p1ItTag.classList.remove('hidden');
+                hudP1.classList.add('ring-2', 'ring-amber-400');
+            } else {
+                p1ItTag.classList.add('hidden');
+                hudP1.classList.remove('ring-2', 'ring-amber-400');
+            }
+        }
+
+        function spawnParticles(x, y, color, count = 8) {
+            for (let i = 0; i < count; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 45 + Math.random() * 140;
+                particles.push({
+                    x,
+                    y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed - 40,
+                    size: 2 + Math.random() * 2.5,
+                    color,
+                    life: 0.35 + Math.random() * 0.25,
+                    maxLife: 0.6
+                });
+            }
+        }
+
+        function respawnAfterKnockout(r) {
+            r.health = MAX_HEALTH;
+            r.stamina = MAX_STAMINA;
+            r.comboCount = 0;
+            r.comboTimer = 0;
+            r.blocking = false;
+            r.hitFlashTimer = 0;
+            r.attackTimer = 0;
+            r.attackCooldown = 0.4;
+            r.grapple.active = false;
+            r.vx = 0;
+            r.vy = 0;
+            r.x = Math.max(40, Math.min(canvas.width - r.w - 40, (hashString(r.id) % 5) * 180 + 80));
+            r.y = 45;
+            r.grounded = false;
+            spawnParticles(r.x + r.w / 2, r.y + r.h / 2, r.scarfColor, 24);
+        }
+
+        function takeHit(r, attackerId, damage) {
+            if (r.hitFlashTimer > 0) return;
+            let damageTaken = damage;
+            if (r.blocking && r.stamina > 0) {
+                damageTaken = Math.max(2, damage * 0.25);
+                r.stamina = Math.max(0, r.stamina - 18);
+                r.vx *= 0.35;
+                combatTexts.push({ x: r.x + r.w / 2, y: r.y - 8, text: 'GUARD!', color: '#22d3ee', life: 0.55 });
+            }
+            r.health = Math.max(0, r.health - damageTaken);
+            r.hitFlashTimer = 0.18;
+            r.grapple.active = false;
+
+            const attacker = attackerId === 'local-bot'
+                ? practiceBot
+                : (attackerId === localPlayerId ? localRunner : remotePlayers.get(attackerId));
+            const pushDir = attacker
+                ? (r.x < attacker.x ? -1 : 1)
+                : r.facing === 1 ? -1 : 1;
+            r.vx = pushDir * 430;
+            r.vy = -310;
+            spawnParticles(r.x + r.w / 2, r.y + r.h / 2, '#fb7185', 16);
+
+            if (r.health <= 0) {
+                if (attacker && attacker !== r) attacker.kos = (attacker.kos || 0) + 1;
+                const loser = r.id === localPlayerId ? getEffectivePlayerName() : (r.label || 'Runner');
+                const winner = attacker
+                    ? (attacker.id === localPlayerId ? getEffectivePlayerName() : (attacker.label || 'Bot'))
+                    : 'Fighter';
+                const knockoutText = `${winner} K.O. ${loser}!`;
+                showCanvasToast(knockoutText);
+                combatFeed.unshift(knockoutText);
+                while (combatFeed.length > 6) combatFeed.pop();
+                combatTexts.push({ x: r.x + r.w / 2, y: r.y - 28, text: 'K.O.!', color: '#fbbf24', life: 1.2 });
+                respawnAfterKnockout(r);
+                updateHud();
+                pushLocalStateToNetwork();
+            }
+        }
+
+        function handleFightingLogic() {
+            const opponents = Array.from(remotePlayers.values());
+            if (botEnabled) opponents.push(practiceBot);
+
+            if (localRunner.attackTimer > 0 && !localRunner.attackHit) {
+                const hitX = localRunner.facing === 1
+                    ? localRunner.x + localRunner.w
+                    : localRunner.x - 30;
+                const hitBox = {
+                    x: hitX,
+                    y: localRunner.y - 3,
+                    w: localRunner.attackKind === 'heavy' ? 38 : 30,
+                    h: localRunner.attackKind === 'heavy' ? 28 : 24
+                };
+                const attackDamage = localRunner.attackDamage || ATTACK_DAMAGE;
+
+                for (const opp of opponents) {
+                    const overlap =
+                        hitBox.x < opp.x + opp.w &&
+                        hitBox.x + hitBox.w > opp.x &&
+                        hitBox.y < opp.y + opp.h &&
+                        hitBox.y + hitBox.h > opp.y;
+                    if (!overlap) continue;
+
+                    localRunner.attackHit = true;
+                    if (opp.id === 'local-bot') {
+                        takeHit(practiceBot, localPlayerId, attackDamage);
+                    } else {
+                        const damageTaken = opp.blocking ? Math.max(2, attackDamage * 0.25) : attackDamage;
+                        opp.health = Math.max(0, opp.health - damageTaken);
+                        opp.hitFlashTimer = 0.18;
+                        opp.vx = localRunner.facing * 430;
+                        opp.vy = -310;
+                        const hitMsg = {
+                            type: 'hit',
+                            targetId: opp.id,
+                            attackerId: localPlayerId,
+                            damage: attackDamage,
+                            room: currentRoom
+                        };
+                        publishWssMessage(hitMsg);
+                        broadcastToPeers(hitMsg);
+                        if (localChannel) localChannel.postMessage(hitMsg);
+                        if (opp.health <= 0) {
+                            opp.health = MAX_HEALTH;
+                            localRunner.kos = (localRunner.kos || 0) + 1;
+                            updateHud();
+                        }
+                    }
+                    break;
+                }
+            }
+
+            if (botEnabled && practiceBot.attackTimer > 0 && !practiceBot.attackHit) {
+                const hitX = practiceBot.facing === 1
+                    ? practiceBot.x + practiceBot.w
+                    : practiceBot.x - 30;
+                const hitBox = { x: hitX, y: practiceBot.y - 3, w: 30, h: 24 };
+                const overlap =
+                    hitBox.x < localRunner.x + localRunner.w &&
+                    hitBox.x + hitBox.w > localRunner.x &&
+                    hitBox.y < localRunner.y + localRunner.h &&
+                    hitBox.y + hitBox.h > localRunner.y;
+
+                if (overlap) {
+                    practiceBot.attackHit = true;
+                    takeHit(localRunner, practiceBot.id, practiceBot.attackDamage || ATTACK_DAMAGE);
+                }
+            }
+        }
+
+        function handleMultiPlayerTagLogic(dt) {
+            if (tagFreezeTimer > 0) {
+                tagFreezeTimer -= dt;
+                return;
+            }
+
+            // Build list of all active opponents (unlimited remote players + optional practice bot)
+            const opponents = Array.from(remotePlayers.values());
+            if (botEnabled) {
+                opponents.push(practiceBot);
+            }
+
+            for (const opp of opponents) {
+                const overlap =
+                    localRunner.x < opp.x + opp.w &&
+                    localRunner.x + localRunner.w > opp.x &&
+                    localRunner.y < opp.y + opp.h &&
+                    localRunner.y + localRunner.h > opp.y;
+
+                if (!overlap) continue;
+
+                // Case A: Local player is "IT" and tags an opponent!
+                if (localRunner.isIt && !opp.isIt) {
+                    localRunner.isIt = false;
+                    localRunner.itChangedAt = Date.now();
+                    localRunner.tagsScored += 1;
+                    opp.isIt = true;
+
+                    if (opp.id === 'local-bot') {
+                        practiceBot.isIt = true;
+                    } else {
+                        // Notify remote peer immediately via WSS Relay + WebRTC P2P + Firestore + BroadcastChannel
+                        const tagMsg = { type: 'tagged', targetId: opp.id, room: currentRoom };
+                        publishWssMessage(tagMsg);
+                        broadcastToPeers(tagMsg);
+                        if (localChannel) {
+                            localChannel.postMessage(tagMsg);
+                        }
+                        if (db && currentUser) {
+                            const targetDoc = doc(db, 'artifacts', appId, 'public', 'data', `tag_room_${currentRoom}`, opp.id);
+                            updateDoc(targetDoc, {
+                                isIt: true,
+                                itChangedAt: Date.now()
+                            }).catch(() => {});
+                        }
+                    }
+
+                    tagFreezeTimer = 0.65;
+                    const pushDir = localRunner.x < opp.x ? -1 : 1;
+                    localRunner.vx = pushDir * 290;
+                    localRunner.vy = -220;
+                    localRunner.grapple.active = false;
+                    spawnParticles((localRunner.x + opp.x) / 2 + 7, (localRunner.y + opp.y) / 2 + 9, '#fbbf24', 20);
+                    updateHud();
+                    pushLocalStateToNetwork();
+                    break;
+                }
+
+                // Case B: Practice bot is "IT" and tags local player
+                if (opp.id === 'local-bot' && practiceBot.isIt && !localRunner.isIt) {
+                    practiceBot.isIt = false;
+                    practiceBot.tagsScored += 1;
+                    localRunner.isIt = true;
+                    localRunner.itChangedAt = Date.now();
+                    tagFreezeTimer = 0.65;
+                    const pushDir = localRunner.x < practiceBot.x ? -1 : 1;
+                    localRunner.vx = pushDir * 280;
+                    practiceBot.vx = -pushDir * 280;
+                    localRunner.vy = -220;
+                    practiceBot.vy = -220;
+                    localRunner.grapple.active = false;
+                    practiceBot.grapple.active = false;
+                    spawnParticles((localRunner.x + practiceBot.x) / 2 + 7, (localRunner.y + practiceBot.y) / 2 + 9, '#fbbf24', 18);
+                    updateHud();
+                    break;
+                }
+            }
+        }
+
+        function drawRunner(r, tagLabel = null) {
+            ctx.save();
+            const x = r.x;
+            const y = r.y;
+
+            if (r.blocking) {
+                ctx.strokeStyle = '#22d3ee';
+                ctx.lineWidth = 2;
+                ctx.globalAlpha = 0.9;
+                ctx.beginPath();
+                ctx.arc(x + r.w / 2 + r.facing * 7, y + r.h / 2, 10, -1.2, 1.2);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+            }
+
+            if (r.chargeTime > 0) {
+                const chargeRatio = Math.min(1, r.chargeTime / 0.9);
+                ctx.strokeStyle = chargeRatio >= 0.65 ? '#fde68a' : r.scarfColor;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(x + r.w / 2, y + r.h / 2, 9 + chargeRatio * 5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * chargeRatio);
+                ctx.stroke();
+            }
+
+            if (r.health !== undefined) {
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.82)';
+                ctx.fillRect(x - 2, y - 13, r.w + 4, 3);
+                ctx.fillStyle = r.health > 40 ? '#34d399' : '#fb7185';
+                ctx.fillRect(x - 2, y - 13, (r.w + 4) * Math.max(0, r.health) / MAX_HEALTH, 3);
+            }
+
+            if (r.attackTimer > 0) {
+                ctx.fillStyle = r.hitFlashTimer > 0 ? '#ffffff' : r.scarfColor;
+                ctx.beginPath();
+                ctx.arc(
+                    x + r.w / 2 + r.facing * 13,
+                    y + r.h / 2,
+                    4.5,
+                    0,
+                    Math.PI * 2
+                );
+                ctx.fill();
+            }
+
+            if (r.grounded) {
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.22)';
+                ctx.beginPath();
+                ctx.ellipse(x + r.w / 2, y + r.h, 7, 2.2, 0, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Flowing scarf tail
+            const scarfWave = Math.sin(performance.now() * 0.015 + hashString(String(r.id))) * 2.5;
+            ctx.fillStyle = r.scarfColor;
+            ctx.beginPath();
+            ctx.moveTo(x + r.w / 2, y + 7);
+            ctx.lineTo(x + r.w / 2 - r.facing * 9, y + 5 + scarfWave);
+            ctx.lineTo(x + r.w / 2 - r.facing * 7, y + 9 + scarfWave);
+            ctx.closePath();
+            ctx.fill();
+
+            // Legs animation
+            const legSwing = r.grounded ? Math.sin(r.walkCycle) * 3.2 : 2.5;
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 2.2;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(x + 5, y + 13);
+            ctx.lineTo(x + 5 - legSwing, y + r.h);
+            ctx.moveTo(x + 9, y + 13);
+            ctx.lineTo(x + 9 + legSwing, y + r.h);
+            ctx.stroke();
+
+            // Body & Head
+            ctx.fillStyle = r.bodyColor;
+            ctx.beginPath();
+            ctx.roundRect(x + 2, y + 4, r.w - 4, 10, 4);
+            ctx.fill();
+
+            // Hood / Cap
+            ctx.fillStyle = r.hatColor;
+            ctx.beginPath();
+            ctx.arc(x + r.w / 2, y + 4.5, 5.2, Math.PI, 0);
+            ctx.fill();
+
+            // Eyes
+            ctx.fillStyle = '#ffffff';
+            const eyeX = r.facing === 1 ? x + 8.5 : x + 3;
+            ctx.fillRect(eyeX, y + 4.2, 2.3, 2.3);
+
+            // Name tag for remote peers or Bot
+            if (tagLabel) {
+                ctx.font = '700 8px Lato, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
+                ctx.fillText(tagLabel, x + r.w / 2, y - 3);
+            }
+
+            // Floating "IT" crown badge
+            if (r.isIt) {
+                const floatY = y - (tagLabel ? 13 : 6) + Math.sin(performance.now() * 0.008) * 2;
+                ctx.shadowColor = 'rgba(245, 158, 11, 0.85)';
+                ctx.shadowBlur = 6;
+                ctx.font = '900 8px Lato, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillStyle = '#f59e0b';
+                ctx.fillText('IT!', x + r.w / 2, floatY - 3);
+                ctx.shadowBlur = 0;
+            }
+
+            ctx.restore();
+        }
+
+        function drawGrappleHook(r) {
+            if (!r.grapple || !r.grapple.active) return;
+
+            ctx.save();
+            const startX = r.x + r.w / 2;
+            const startY = r.y + 5;
+            const endX = r.grapple.ax;
+            const endY = r.grapple.ay;
+
+            ctx.strokeStyle = r.scarfColor || 'rgba(59, 130, 246, 0.45)';
+            ctx.globalAlpha = 0.45;
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = '#334155';
+            ctx.lineWidth = 1.6;
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+
+            ctx.fillStyle = '#f59e0b';
+            ctx.beginPath();
+            ctx.arc(endX, endY, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 1.4;
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        function updateAfterimages(dt) {
+            for (let i = afterimages.length - 1; i >= 0; i--) {
+                const img = afterimages[i];
+                img.life -= dt;
+                if (img.life <= 0) {
+                    afterimages.splice(i, 1);
+                    continue;
+                }
+                ctx.globalAlpha = (img.life / img.maxLife) * 0.45;
+                ctx.fillStyle = img.color;
+                ctx.beginPath();
+                ctx.roundRect(img.x + 1, img.y + 3, img.w - 2, img.h - 5, 4);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+        }
+
+        function updateParticles(dt) {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.life -= dt;
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                    continue;
+                }
+                p.vy += 420 * dt;
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+
+                ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+        }
+
+        function updateCombatText(dt) {
+            for (let i = combatTexts.length - 1; i >= 0; i--) {
+                const text = combatTexts[i];
+                text.life -= dt;
+                text.y -= 24 * dt;
+                if (text.life <= 0) {
+                    combatTexts.splice(i, 1);
+                    continue;
+                }
+                ctx.save();
+                ctx.globalAlpha = Math.min(1, text.life * 2);
+                ctx.font = '900 14px Lato, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillStyle = text.color;
+                ctx.shadowColor = 'rgba(15, 23, 42, 0.9)';
+                ctx.shadowBlur = 5;
+                ctx.fillText(text.text, text.x, text.y);
+                ctx.restore();
+            }
+
+            if (combatFeed.length > 0) {
+                ctx.save();
+                ctx.font = '700 11px Lato, sans-serif';
+                ctx.textAlign = 'left';
+                for (let i = 0; i < Math.min(combatFeed.length, 4); i++) {
+                    ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
+                    ctx.fillRect(18, 18 + i * 25, ctx.measureText(combatFeed[i]).width + 18, 20);
+                    ctx.fillStyle = i === 0 ? '#fbbf24' : '#e2e8f0';
+                    ctx.fillText(combatFeed[i], 27, 32 + i * 25);
+                }
+                ctx.restore();
+            }
+        }
+
+        function updateBotAi(bot, target, dt) {
+            const dx = target.x - bot.x;
+            const dy = target.y - bot.y;
+            const dist = Math.hypot(dx, dy);
+
+            const wantDir = bot.isIt ? Math.sign(dx || 1) : -Math.sign(dx || 1);
+            let moveLeft = wantDir < 0;
+            let moveRight = wantDir > 0;
+            let holdUp = false;
+            let holdDown = false;
+
+            if (!bot.isIt) {
+                if (bot.x < 110) { moveLeft = false; moveRight = true; }
+                if (bot.x > canvas.width - 130) { moveRight = false; moveLeft = true; }
+            }
+
+            bot.aiJumpTimer -= dt;
+            bot.aiGrappleTimer -= dt;
+
+            if (bot.grapple.active) {
+                const anchorDy = bot.grapple.ay - bot.y;
+                if (anchorDy < -20) holdUp = true;
+                if (bot.y <= bot.grapple.ay + 24 || (bot.isIt && dist < 85) || bot.aiGrappleTimer <= -1.3) {
+                    handleJumpInput(bot);
+                    bot.aiGrappleTimer = 1.1 + Math.random() * 0.8;
+                }
+            } else if (bot.aiGrappleTimer <= 0) {
+                const targetMuchHigher = bot.isIt && dy < -95 && dist < 340;
+                const fallingLow = bot.vy > 210 && bot.y > canvas.height * 0.58;
+                const panicEscape = !bot.isIt && dist < 130 && bot.y > 140;
+                if (targetMuchHigher || fallingLow || panicEscape) {
+                    bot.facing = moveRight ? 1 : (moveLeft ? -1 : bot.facing);
+                    toggleGrapple(bot, Math.abs(dx) < 55);
+                    bot.aiGrappleTimer = 1.4 + Math.random() * 0.9;
+                }
+            }
+
+            if (bot.aiJumpTimer <= 0 && !bot.grapple.active) {
+                if ((bot.isIt && dy < -35) || (!bot.isIt && dist < 150 && bot.grounded) || bot.wallSide !== 0) {
+                    handleJumpInput(bot);
+                    bot.aiJumpTimer = 0.35 + Math.random() * 0.35;
+                } else if (bot.isIt && dy > 75 && bot.grounded) {
+                    holdDown = true;
+                    bot.aiJumpTimer = 0.4;
+                }
+            }
+
+            if (bot.dashCooldown <= 0 && !bot.grapple.active) {
+                if ((bot.isIt && Math.abs(dy) < 35 && dist > 90 && dist < 210) || (!bot.isIt && dist < 75)) {
+                    triggerDash(bot, wantDir || bot.facing);
+                }
+            }
+
+            if (dist < 44 && bot.attackCooldown <= 0) {
+                bot.facing = dx >= 0 ? 1 : -1;
+                if (!bot.blocking && Math.random() < 0.18 && bot.stamina >= 24) {
+                    bot.chargeTime = 0.75;
+                    triggerHeavyAttack(bot);
+                } else {
+                    triggerAttack(bot);
+                }
+            }
+
+            bot.blocking = dist < 38 && !bot.isIt && bot.stamina > 20 && Math.random() < 0.012;
+
+            return { moveLeft, moveRight, holdUp, holdDown };
+        }
+
+        function stepRunner(r, dt, isBot = false) {
+            let moveLeft = false;
+            let moveRight = false;
+            let holdUp = false;
+            let holdDown = false;
+
+            if (!isBot) {
+                moveLeft = !!(keys['KeyA'] || keys['ArrowLeft']);
+                moveRight = !!(keys['KeyD'] || keys['ArrowRight']);
+                holdUp = !!(keys['KeyW'] || keys['ArrowUp'] || keys['Space']);
+                holdDown = !!(keys['KeyS'] || keys['ArrowDown']);
+            } else {
+                const ai = updateBotAi(r, localRunner, dt);
+                moveLeft = ai.moveLeft;
+                moveRight = ai.moveRight;
+                holdUp = ai.holdUp;
+                holdDown = ai.holdDown;
+            }
+
+            if (r.dropThroughTimer > 0) r.dropThroughTimer -= dt;
+            if (r.dashCooldown > 0) r.dashCooldown -= dt;
+            if (r.attackCooldown > 0) r.attackCooldown -= dt;
+            if (r.attackTimer > 0) r.attackTimer -= dt;
+            if (r.hitFlashTimer > 0) r.hitFlashTimer -= dt;
+            if (r.comboTimer > 0) r.comboTimer -= dt;
+            else r.comboCount = 0;
+            if (r.chargeTime !== undefined && keys['KeyK']) r.chargeTime = Math.min(1.2, r.chargeTime + dt);
+            if (!r.blocking) r.stamina = Math.min(MAX_STAMINA, r.stamina + 18 * dt);
+            else r.stamina = Math.max(0, r.stamina - 8 * dt);
+            if (r.coyoteTimer > 0) r.coyoteTimer -= dt;
+            if (r.jumpBufferTimer > 0) r.jumpBufferTimer -= dt;
+
+            if (holdDown && r.grounded && r.y + r.h < canvas.height - 6 && !r.grapple.active) {
+                r.dropThroughTimer = 0.22;
+                r.grounded = false;
+                r.coyoteTimer = 0;
+                r.y += 4;
+            }
+
+            // 1. Horizontal & Tangential Pendulum Swing Acceleration
+            if (r.dashTimer > 0) {
+                r.dashTimer -= dt;
+                r.vx = r.dashDir * DASH_SPEED;
+                if (Math.random() < 0.75) {
+                    afterimages.push({
+                        x: r.x,
+                        y: r.y,
+                        w: r.w,
+                        h: r.h,
+                        color: r.scarfColor,
+                        life: 0.16,
+                        maxLife: 0.16
+                    });
+                }
+            } else if (r.grapple.active) {
+                // True tangential pendulum swing pumping!
+                const cx = r.x + r.w / 2;
+                const cy = r.y + 5;
+                const rx = cx - r.grapple.ax;
+                const ry = cy - r.grapple.ay;
+                const dist = Math.max(1, Math.hypot(rx, ry));
+                // Tangent vector pointing counter-clockwise (rightward at bottom of arc)
+                const tx = ry / dist;
+                const ty = -rx / dist;
+
+                if (moveLeft) {
+                    r.vx -= tx * SWING_PUMP_FORCE * dt;
+                    r.vy -= ty * SWING_PUMP_FORCE * dt;
+                    r.facing = -1;
+                }
+                if (moveRight) {
+                    r.vx += tx * SWING_PUMP_FORCE * dt;
+                    r.vy += ty * SWING_PUMP_FORCE * dt;
+                    r.facing = 1;
+                }
+                r.vx *= Math.pow(SWING_DAMPING, dt * 60);
+                r.vy *= Math.pow(SWING_DAMPING, dt * 60);
+            } else {
+                const accel = r.grounded ? GROUND_ACCEL : AIR_ACCEL;
+                if (moveLeft) {
+                    r.vx -= accel * dt;
+                    r.facing = -1;
+                }
+                if (moveRight) {
+                    r.vx += accel * dt;
+                    r.facing = 1;
+                }
+                if (!moveLeft && !moveRight) {
+                    const drag = r.grounded ? GROUND_FRICTION : AIR_DRAG;
+                    r.vx *= Math.pow(drag, dt * 60);
+                }
+                if (r.vx > MAX_VX) r.vx = MAX_VX;
+                if (r.vx < -MAX_VX) r.vx = -MAX_VX;
+            }
+
+            // 2. Gravity (with apex hang-time smoothing for crisp platforming!)
+            if (r.dashTimer <= 0) {
+                const apexMultiplier = (!r.grounded && !r.grapple.active && Math.abs(r.vy) < 95) ? 0.68 : 1.0;
+                r.vy += GRAVITY * apexMultiplier * dt;
+            }
+
+            // 3. Reel grapple cable up/down smoothly
+            if (r.grapple.active) {
+                if (holdUp) {
+                    r.grapple.length = Math.max(20, r.grapple.length - 255 * dt);
+                } else if (holdDown) {
+                    r.grapple.length = Math.min(MAX_GRAPPLE_DIST, r.grapple.length + 210 * dt);
+                }
+            }
+
+            const prevX = r.x;
+            const prevY = r.y;
+            const prevBottom = prevY + r.h;
+
+            r.x += r.vx * dt;
+            r.y += r.vy * dt;
+
+            // 4. Velocity-Corrected Pendulum Rope Constraint (preserves kinetic swing energy!)
+            if (r.grapple.active) {
+                const cx = r.x + r.w / 2;
+                const cy = r.y + 5;
+                const dx = cx - r.grapple.ax;
+                const dy = cy - r.grapple.ay;
+                const dist = Math.hypot(dx, dy);
+
+                if (dist > r.grapple.length && dist > 0.001) {
+                    const nx = dx / dist;
+                    const ny = dy / dist;
+
+                    // Snap position back onto the swing arc radius
+                    r.x = r.grapple.ax + nx * r.grapple.length - r.w / 2;
+                    r.y = r.grapple.ay + ny * r.grapple.length - 5;
+
+                    // Remove outward radial velocity and redirect into tangential swing speed
+                    const radialVel = r.vx * nx + r.vy * ny;
+                    if (radialVel > 0) {
+                        r.vx -= radialVel * nx;
+                        r.vy -= radialVel * ny;
+                    }
+                }
+            }
+
+            // 5. Side Wall Collisions & Wall-Sliding
+            r.wallSide = 0;
+            for (const wall of solidWalls) {
+                if (r.y + r.h > wall.y + 4 && r.y < wall.y + wall.h - 4) {
+                    if (prevX + r.w <= wall.x + 4 && r.x + r.w > wall.x) {
+                        r.x = wall.x - r.w;
+                        r.vx = 0;
+                        r.wallSide = 1;
+                    } else if (prevX >= wall.x + wall.w - 4 && r.x < wall.x + wall.w) {
+                        r.x = wall.x + wall.w;
+                        r.vx = 0;
+                        r.wallSide = -1;
+                    }
+                }
+            }
+
+            if (r.x <= 2) {
+                r.x = 2;
+                if (r.vx < 0) r.vx = 0;
+                if (!r.grounded) r.wallSide = -1;
+            } else if (r.x + r.w >= canvas.width - 2) {
+                r.x = canvas.width - r.w - 2;
+                if (r.vx > 0) r.vx = 0;
+                if (!r.grounded) r.wallSide = 1;
+            }
+
+            if (r.wallSide !== 0 && !r.grounded && r.vy > WALL_SLIDE_MAX_VY && !r.grapple.active) {
+                r.vy = WALL_SLIDE_MAX_VY;
+                if (Math.random() < 0.25) {
+                    spawnParticles(r.wallSide === 1 ? r.x + r.w : r.x, r.y + r.h * 0.7, '#cbd5e1', 1);
+                }
+            }
+
+            // 6. One-Way Platform Landing & Ground-Slam Impact Burst
+            const wasGrounded = r.grounded;
+            r.grounded = false;
+            if (r.vy >= 0 && r.dropThroughTimer <= 0) {
+                for (const plat of platforms) {
+                    const withinX = r.x + r.w - 2 > plat.x && r.x + 2 < plat.x + plat.w;
+                    if (withinX && prevBottom <= plat.y + 7 && r.y + r.h >= plat.y) {
+                        if (r.fastFalling) {
+                            spawnParticles(r.x + r.w / 2, plat.y, r.scarfColor, 14);
+                            r.fastFalling = false;
+                        }
+                        r.y = plat.y - r.h;
+                        r.vy = 0;
+                        r.grounded = true;
+                        r.coyoteTimer = COYOTE_TIME_MAX;
+                        r.jumpsLeft = 2;
+                        r.wallSide = 0;
+                        break;
+                    }
+                }
+            }
+
+            if (r.y + r.h >= canvas.height) {
+                if (r.fastFalling) {
+                    spawnParticles(r.x + r.w / 2, canvas.height, r.scarfColor, 14);
+                    r.fastFalling = false;
+                }
+                r.y = canvas.height - r.h;
+                r.vy = 0;
+                r.grounded = true;
+                r.coyoteTimer = COYOTE_TIME_MAX;
+                r.jumpsLeft = 2;
+                r.wallSide = 0;
+            }
+
+            // Grant Coyote Time if runner just walked off a card ledge
+            if (wasGrounded && !r.grounded && r.vy >= 0) {
+                r.coyoteTimer = COYOTE_TIME_MAX;
+            }
+
+            // Execute buffered jump immediately upon landing
+            if (r.grounded && r.jumpBufferTimer > 0) {
+                handleJumpInput(r);
+            }
+
+            if (r.y < 0) {
+                r.y = 0;
+                if (r.vy < 0) r.vy = 0;
+            }
+
+            if (r.grounded && Math.abs(r.vx) > 15) {
+                r.walkCycle += Math.abs(r.vx) * dt * 0.14;
+            } else {
+                r.walkCycle = 0;
+            }
+        }
+
+        function stepRemotePlayers(dt) {
+            const now = Date.now();
+            for (const [id, rp] of remotePlayers.entries()) {
+                // Prune stale disconnected clients after 12 seconds
+                if (now - rp.lastSeen > 12000) {
+                    remotePlayers.delete(id);
+                    updatePlayerCountBadge();
+                    continue;
+                }
+                if (rp.attackTimer > 0) rp.attackTimer -= dt;
+                if (rp.hitFlashTimer > 0) rp.hitFlashTimer -= dt;
+                // Smooth dead-reckoning + exponential interpolation
+                rp.targetX += rp.vx * dt * 0.35;
+                rp.targetY += rp.vy * dt * 0.35;
+                const lerpFactor = Math.min(1, dt * 16);
+                rp.x += (rp.targetX - rp.x) * lerpFactor;
+                rp.y += (rp.targetY - rp.y) * lerpFactor;
+
+                if (rp.grounded && Math.abs(rp.vx) > 15) {
+                    rp.walkCycle += Math.abs(rp.vx) * dt * 0.14;
+                } else {
+                    rp.walkCycle = 0;
+                }
+            }
+        }
+
+        function loop(now) {
+            if (!gameActive) return;
+
+            const dt = Math.min((now - lastFrameTime) / 1000, 0.05);
+            lastFrameTime = now;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Step local player & optional practice bot
+            stepRunner(localRunner, dt, false);
+            if (botEnabled) {
+                stepRunner(practiceBot, dt, true);
+            }
+            stepRemotePlayers(dt);
+            handleMultiPlayerTagLogic(dt);
+            handleFightingLogic();
+            updateHud();
+
+            // Sync local player state to cloud / P2P channel (~12Hz)
+            netSyncTimer += dt;
+            if (netSyncTimer >= 0.085) {
+                netSyncTimer = 0;
+                pushLocalStateToNetwork();
+            }
+
+            // Broadcast room presence to global Lobby Picker every 2.5s
+            lobbyPulseTimer += dt;
+            if (lobbyPulseTimer >= 2.5) {
+                lobbyPulseTimer = 0;
+                publishLobbyPresence();
+            }
+
+            // Render visual effects, grapples, and all runners
+            updateAfterimages(dt);
+            updateParticles(dt);
+            updateCombatText(dt);
+
+            for (const rp of remotePlayers.values()) {
+                drawGrappleHook(rp);
+                drawRunner(rp, rp.label);
+            }
+
+            if (botEnabled) {
+                drawGrappleHook(practiceBot);
+                drawRunner(practiceBot, 'Bot');
+            }
+
+            drawGrappleHook(localRunner);
+            drawRunner(localRunner, customDisplayName.trim() ? getEffectivePlayerName() : null);
+
+            requestAnimationFrame(loop);
+        }
+
+        window.addEventListener('load', () => {
+            resizeGameCanvas();
+            scanDomPlatforms();
+            renderColorSwatches();
+            initMultiplayerBackend();
+        });
+    </script>
+</body>
+</html>
