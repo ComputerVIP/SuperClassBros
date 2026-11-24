@@ -1,0 +1,60 @@
+body {
+    background-color: #ffffff;
+    color: #2d3b45;
+    font-family: 'Lato', sans-serif;
+    overflow-x: hidden;
+    margin: 0;
+}
+
+/* Subtle Canvas-style scrollbar */
+::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar-track { background: #f8f9fa; }
+::-webkit-scrollbar-thumb { background: #c7cdd1; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #a5aeb5; }
+
+/* Course card shadow matching Instructure Canvas */
+.canvas-card {
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
+    transition: box-shadow 0.2s ease, transform 0.15s ease;
+}
+.canvas-card:hover { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14); }
+
+/* Secret UCAS starburst button inside the 'A' */
+.secret-atom {
+    cursor: pointer;
+    transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.25s ease;
+}
+.secret-atom:hover {
+    transform: scale(1.22) rotate(45deg);
+    filter: drop-shadow(0 0 4px rgba(28, 92, 67, 0.65));
+}
+.secret-atom.active-game {
+    animation: spinSlow 6s linear infinite;
+    filter: drop-shadow(0 0 6px rgba(37, 99, 235, 0.8));
+}
+@keyframes spinSlow {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Full-viewport game overlay canvas */
+#ui-tag-canvas {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    pointer-events: none;
+    z-index: 9990;
+}
+
+/* Game menu pill: hidden when the game is off, or collapsed by the player */
+.hud-pill { transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease; }
+.hud-pill.hidden-hud { transform: translate(-50%, 140%); opacity: 0; pointer-events: none; }
+.hud-pill.visible-hud { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
+.hud-pill.menu-collapsed { transform: translate(-50%, 140%); opacity: 0; pointer-events: none; }
+
+/* Mode-specific menu parts */
+#game-hud[data-mode="tag"] .fight-only,
+#game-hud[data-mode="fight"] .tag-only { display: none !important; }
+#customizer-popover .fight-only { display: none; }
+body:has(#game-hud[data-mode="fight"]) #customizer-popover .fight-only { display: inline; }
