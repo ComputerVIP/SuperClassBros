@@ -14,5 +14,8 @@
   "flags": [
     {"x":1420,"y":490}
   ],
-  "pickups": []
+  "pickups": [],
+  "texts": [
+    {"x":620,"y":390,"text":"E to grapple","size":20}
+  ]
 }

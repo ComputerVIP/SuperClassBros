@@ -1,0 +1,25 @@
+{
+  "format": "super-class-bros-level",
+  "version": 1,
+  "name": "Frame Perfect",
+  "size": [1440, 810],
+  "spawn": {"x":520,"y":590},
+  "cards": [
+    {"x":620,"y":490,"w":100,"h":100,"dim":"both"},
+    {"x":420,"y":490,"w":80,"h":100,"dim":"both"},
+    {"x":420,"y":590,"w":590,"h":50,"dim":"both"}
+  ],
+  "ledges": [],
+  "springs": [
+    {"x":500,"y":490,"w":120,"h":14,"dim":"both"}
+  ],
+  "boosts": [],
+  "flags": [
+    {"x":990,"y":590},
+    {"x":600,"y":590}
+  ],
+  "pickups": [],
+  "texts": [
+    {"x":370,"y":380,"text":"You can go down through jump pads and ledges","size":20}
+  ]
+}

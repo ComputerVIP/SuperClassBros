@@ -15,5 +15,9 @@
   "flags": [
     {"x":960,"y":500}
   ],
-  "pickups": []
+  "pickups": [],
+  "texts": [
+    {"x":570,"y":400,"text":"Shift to dash","size":20},
+    {"x":850,"y":450,"text":"Touch the flag to win","size":20}
+  ]
 }

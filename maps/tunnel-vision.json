@@ -1,0 +1,25 @@
+{
+  "format": "super-class-bros-level",
+  "version": 1,
+  "name": "Tunnel Vision",
+  "size": [1440, 810],
+  "spawn": {"x":490,"y":480},
+  "cards": [
+    {"x":460,"y":480,"w":460,"h":40,"dim":"both"},
+    {"x":460,"y":390,"w":460,"h":30,"dim":"both"},
+    {"x":560,"y":460,"w":20,"h":20,"dim":"both"},
+    {"x":630,"y":420,"w":80,"h":30,"dim":"both"},
+    {"x":610,"y":470,"w":100,"h":20,"dim":"both"},
+    {"x":770,"y":440,"w":40,"h":42,"dim":"both"}
+  ],
+  "ledges": [],
+  "springs": [],
+  "boosts": [
+    {"x":460,"y":420,"w":460,"h":60,"dim":"both","dir":0,"power":700}
+  ],
+  "flags": [
+    {"x":900,"y":480}
+  ],
+  "pickups": [],
+  "texts": []
+}

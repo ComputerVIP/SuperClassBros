@@ -51,16 +51,15 @@ export const MAX_BOTS = 8;
 const STAND_H = 18;
 const SLIDE_H = 10;
 
-/**
- * Server types. `dev: true` means it can only be joined with developer mode on (add ?dev=1 to the link).
- * Everything except "platformer" is a flavor of tag and shares the IT rules below.
- */
+/** Server types. Tag, Infection, Freeze Tag and Hot Potato share the IT rules below. Overdue plays on the same page
+ *  with the same bots but has no IT (see OVERDUE). The Platformer has its own levels. */
 export const MODES = {
     tag:        { label: 'Tag' },
-    infection:  { label: 'Infection (dev)',   dev: true },
-    freeze:     { label: 'Freeze Tag (dev)',  dev: true },
-    potato:     { label: 'Hot Potato (dev)',  dev: true },
-    platformer: { label: 'Platformer (dev)',  dev: true },
+    infection:  { label: 'Infection' },
+    freeze:     { label: 'Freeze Tag' },
+    potato:     { label: 'Hot Potato' },
+    overdue:    { label: 'Overdue' },
+    platformer: { label: 'Platformer' },
 };
 export const TAG_MODES = ['tag', 'infection', 'freeze', 'potato'];
 
@@ -122,10 +121,7 @@ export function hashString(str) {
 }
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 export const cleanRoom = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 12) || 'UCAS-1';
-export const cleanMode = (v) => {
-    const m = MODES[v];
-    return m && (!m.dev || DEV) ? v : 'tag';
-};
+export const cleanMode = (v) => (MODES[v] ? v : 'tag');
 
 const playerId = `guest-${crypto.randomUUID().slice(0, 8)}`;
 
@@ -160,6 +156,7 @@ export const palette = () => PALETTES[G.paletteIndex % PALETTES.length];
 export const playerName = () => G.name.trim() || `${palette().name} Runner`;
 export const isTag = () => TAG_MODES.includes(G.mode);
 export const isPlatformer = () => G.mode === 'platformer';
+export const isOverdue = () => G.mode === 'overdue';
 
 export function makeRunner(id, over = {}) {
     return {
@@ -197,7 +194,7 @@ export const bots = Array.from({ length: MAX_BOTS }, (_, i) => makeRunner(i === 
 }));
 export const bot = bots[0];
 export const botCountFor = () => clamp(G.botCount ?? (G.mode === 'tag' ? 1 : 2), 0, MAX_BOTS);
-export const activeBots = () => (isTag() && G.botEnabled ? bots.slice(0, botCountFor()) : []);
+export const activeBots = () => ((isTag() || isOverdue()) && G.botEnabled ? bots.slice(0, botCountFor()) : []);
 export const botActive = () => activeBots().length > 0;
 
 /** Give each bot its level. 'mixed' cycles Normal, Hard, Easy across the bots. */
@@ -210,8 +207,8 @@ export function setBotLevel(level) {
 }
 
 /**
- * Platformer lab: experimental movement and game ideas. They only apply in the Platformer server type
- * with developer mode on, and each can be switched on and off from the dev panel.
+ * Platformer settings. Omnidash, spring pads, slide and slide stacking, dimensions and moving on to the next
+ * level are always on (there are no switches any more). The rest are experiments that are not offered in the menus.
  */
 export const PF = {
     grappleMode: 'auto',   // 'auto' = lock onto the nearest card | 'aimed' = pick a target (keyboard friendly)
@@ -220,17 +217,17 @@ export const PF = {
     springs: true,         // spring pads in the level bounce you
     slide: true,           // hold S while running to slide
     slideStack: true,      // click S again after the cooldown, before the slide ends: a faster slide
-    dimensions: false,     // Tab flips which half of the level is solid (cards, ledges and springs have a dimension)
+    dimensions: true,      // Tab flips which half of the level is solid (cards, ledges and springs have a dimension)
     dim: 0,
-    game: 'race',          // 'sandbox' | 'tide' (rising overdue floor) | 'race' (run through the flags, race your ghost)
+    game: 'race',          // 'sandbox' | 'race' (run through the flags, race your ghost)
     nextMap: true,         // finishing a built-in map moves you on to the next one
+    countdown: 0,          // seconds left of the 2, 1, GO before a level starts
     aim: { cands: [], target: null, index: 0, manualUntil: 0, mx: 0, my: 0, mouseAt: 0 },
-    tide: { t: 0, level: 0, collected: 0, best: 0 },
-    collected: new Set(),
     pickups: [],
+    boosts: [],            // the speed boosts in play (this dimension)
     race: { flags: [], next: 0, t: 0, done: false, doneAt: 0, best: null, ghost: [], rec: [], recT: 0, ghostRunner: null, sig: '' },
 };
-const labOn = () => isPlatformer() && DEV;
+const pfOn = () => isPlatformer();
 
 /** Match the design space to the window. Call on load, on every resize / zoom change, and when the mode changes.
  *  Tag and its variants fit the page. The Platformer is a fixed LEVEL_W x LEVEL_H world, scaled to fit and centered. */
@@ -366,6 +363,7 @@ export function scanWorld() {
         platforms.push(box(r, r.bottom, 4));
     }
     PF.pickups = [];
+    PF.boosts = [];
     G.platforms = platforms;
     G.solids = solids;
 }
@@ -414,7 +412,7 @@ function landOnLedges(r, prevBottom) {
     for (const p of G.platforms) {
         if (!(overLedgeX(r, p) && prevBottom <= p.y + TOL && r.y + r.h >= p.y)) continue;
         land(r, p.y);
-        if (p.spring && labOn() && PF.springs) {
+        if (p.spring && pfOn() && PF.springs) {
             r.vy = -830;
             r.grounded = false;
             r.jumpsLeft = 1;
@@ -454,7 +452,7 @@ function detectWall(r) {
     if (r.x <= 2.5) return -1;
     if (r.x + r.w >= view.w - 2.5) return 1;
     for (const s of G.solids) {
-        if (r.y + r.h <= s.y + 4 || r.y >= s.y + s.h - 4) continue;
+        if (s.noWallJump || r.y + r.h <= s.y + 4 || r.y >= s.y + s.h - 4) continue; // some cards cannot be wall jumped
         if (Math.abs(r.x + r.w - s.x) <= 1.5) return 1;
         if (Math.abs(r.x - (s.x + s.w)) <= 1.5) return -1;
     }
@@ -547,7 +545,7 @@ function endSlide(r) {
 /** Dash. In the dash lab, `vec` is the direction held ({x, y}) and a charge replaces the cooldown. */
 export function triggerDash(r, dir, vec = null) {
     if (r.dashTimer > 0 || r.frozen) return;
-    const charges = labOn() && PF.dashMode === 'charges';
+    const charges = pfOn() && PF.dashMode === 'charges';
     if (charges ? r.dashCharges <= 0 : r.dashCooldown > 0) return;
     if (charges) r.dashCharges--; else r.dashCooldown = isPlatformer() ? T.DASH_COOLDOWN_PF : T.DASH_COOLDOWN;
 
@@ -556,7 +554,7 @@ export function triggerDash(r, dir, vec = null) {
     const face = dir || r.facing || 1;
     let dx = face;
     let dy = null;
-    if (vec && labOn() && PF.dash8 && (vec.x || vec.y)) {
+    if (vec && pfOn() && PF.dash8 && (vec.x || vec.y)) {
         const m = Math.hypot(vec.x, vec.y);
         dx = vec.x / m;
         dy = vec.y / m;
@@ -671,7 +669,7 @@ export function stepRunner(r, dt, rawInput) {
 
     // Slide (lab): hold S while running on the floor or a card. With stacking on, click S again after the
     // cooldown and before the slide ends to slide again with more speed.
-    if (labOn() && PF.slide) {
+    if (pfOn() && PF.slide) {
         const support = supportOf(r);
         const slideSurface = r.grounded && (support === 'floor' || support === 'solid');
         if (r.sliding) r.slideAge += dt;
@@ -717,7 +715,7 @@ export function stepRunner(r, dt, rawInput) {
         const maxVx = T.MAX_VX * r.speedScale;
         // Carrying extra speed from stacked slides: running does not add to it, and it fades out gradually
         // instead of snapping back to the run speed.
-        const carrying = labOn() && PF.slideStack && Math.abs(r.vx) > maxVx;
+        const carrying = pfOn() && PF.slideStack && Math.abs(r.vx) > maxVx;
         if (left) { if (!(carrying && r.vx < 0)) r.vx -= accel * dt; r.facing = -1; }
         if (right) { if (!(carrying && r.vx > 0)) r.vx += accel * dt; r.facing = 1; }
         if (!left && !right) r.vx *= Math.pow(r.grounded ? T.GROUND_FRICTION : T.AIR_DRAG, dt * 60);
@@ -754,6 +752,37 @@ export function stepRunner(r, dt, rawInput) {
     if (r.grounded && r.jumpBufferTimer > 0) handleJump(r);                         // buffered jump
 
     r.walkCycle = r.grounded && Math.abs(r.vx) > 15 ? r.walkCycle + Math.abs(r.vx) * dt * 0.14 : 0;
+    if (pfOn()) touchBoosts(r, dt);
+}
+/** Speed boosts: the moment you enter one, and every 0.1 s while you stay inside, your speed in its direction is
+ *  raised to its speed (its "power") if it is lower. If you are already faster that way, nothing happens. Speed
+ *  across it is kept. It works while grappling: you stay hooked and the rope turns the push into swing speed.
+ *  Extra speed fades after you leave, like after a stacked slide. */
+const BOOST_EVERY = 0.1;
+function touchBoosts(r, dt) {
+    const timers = r.boostTimers || (r.boostTimers = new Map()); // boost id -> seconds until it can push again
+    for (const id of [...timers.keys()]) if (!PF.boosts.some((b) => b.id === id && overlaps(r, b))) timers.delete(id); // left it
+    for (const b of PF.boosts) {
+        if (!overlaps(r, b)) continue;
+        const wait = (timers.get(b.id) ?? 0) - dt;
+        if (wait > 0) { timers.set(b.id, wait); continue; }
+        timers.set(b.id, BOOST_EVERY);
+        const a = (b.dir * Math.PI) / 180;
+        const dx = Math.round(Math.cos(a) * 1000) / 1000;
+        const dy = -Math.round(Math.sin(a) * 1000) / 1000; // screen y grows downward
+        const along = r.vx * dx + r.vy * dy;
+        if (along >= b.power) continue; // already at least this fast that way
+        r.vx += dx * (b.power - along);
+        r.vy += dy * (b.power - along);
+        const speed = Math.hypot(r.vx, r.vy);
+        if (speed > BOOST_MAX_SPEED) { r.vx *= BOOST_MAX_SPEED / speed; r.vy *= BOOST_MAX_SPEED / speed; }
+        r.dashTimer = 0; // a dash would overwrite the push
+        r.fastFalling = false;
+        if (dy < 0) { r.grounded = false; r.coyoteTimer = 0; }
+        if (dx) r.facing = Math.sign(dx);
+        spawnParticles(r.x + r.w / 2, r.y + r.h / 2, '#f97316', 5);
+        if (Math.random() < 0.9) addAfterimage(r);
+    }
 }
 
 // ===========================================================================
@@ -788,7 +817,8 @@ export function toggleGrapple(r, straightUp = false) {
     dx /= mag;
     dy /= mag;
 
-    const anchors = [...G.solids, ...G.platforms];
+    const cards = G.solids.filter((s) => !s.noGrapple); // no-grapple cards are not anchors: the hook passes them by
+    const anchors = [...cards, ...G.platforms];
     const range = T.MAX_GRAPPLE_DIST;
     let bestDist = range;
     let hitX = null;
@@ -828,7 +858,7 @@ export function toggleGrapple(r, straightUp = false) {
     // 3. Still nothing: lock onto the nearest card anyway, at any distance.
     if (hitX === null) {
         let nearest = Infinity;
-        for (const p of G.solids.length ? G.solids : anchors) {
+        for (const p of cards.length ? cards : anchors) {
             const px = clamp(ox, p.x + 4, p.x + p.w - 4);
             const py = clamp(oy - 20, p.y + 2, p.y + p.h);
             const dist = Math.hypot(px - ox, py - oy);
@@ -868,6 +898,7 @@ function aimCandidates(r) {
     const oy = r.y + 4;
     const pts = [];
     for (const b of G.solids) {
+        if (b.noGrapple) continue;
         for (const [x, y] of [[b.x + 4, b.y + 2], [b.x + b.w - 4, b.y + 2], [b.x + b.w / 2, b.y + b.h - 2], [b.x + 4, b.y + b.h - 2], [b.x + b.w - 4, b.y + b.h - 2]]) pts.push({ x, y });
     }
     for (const b of G.platforms) pts.push({ x: b.x + 4, y: b.y + 2 }, { x: b.x + b.w - 4, y: b.y + 2 }, { x: b.x + b.w / 2, y: b.y + b.h / 2 });
@@ -899,7 +930,7 @@ export function updateAim() {
 export function grappleAction(r) {
     if (r.grapple.active) { r.grapple.active = false; return; }
     if (r.frozen) return;
-    if (labOn() && PF.grappleMode === 'aimed' && r === local) {
+    if (pfOn() && PF.grappleMode === 'aimed' && r === local) {
         updateAim();
         const t = aim.target;
         if (t) attachHook(r, t.x, t.y, t.d);
@@ -1016,6 +1047,7 @@ export function resetRoundState() {
     G.round.timer = 0;
     G.round.text = '';
     G.swarm = 0;
+    odReset();
 }
 
 function startNextRound() {
@@ -1152,6 +1184,234 @@ export function runTag(dt) {
 }
 
 // ===========================================================================
+// OVERDUE (its own server type: plays on the dashboard page like Tag, with the same bots, but nobody is IT)
+// ===========================================================================
+// A red "overdue" floor rises from the bottom of the screen after a few seconds. Climb to stay above it.
+// Yellow "on time" dots sit on the page; grabbing one pushes the floor back down for everyone. The room is one
+// team: the floor catches you when it reaches your feet, the round ends when everyone is caught, and the score
+// is how long the team lasted (your best for each difficulty is saved in the browser). More players means fewer
+// dots. The bot difficulty (Easy / Normal / Hard) also sets how fast the floor rises; Mixed counts as Normal.
+// The host (the lowest id, as in the tag variants) runs the floor and the dots and shares them in its
+// snapshots. Everyone else follows the host and tells it when they grab a dot.
+export const OVERDUE_GRACE = 4;   // seconds before the floor starts rising
+export const OVERDUE_PUSH = 90;   // how far one dot pushes the floor back down
+const OD_BEST_KEY = 'scb-overdue-best';
+/** How fast the floor rises at each difficulty (Normal is the original speed). */
+export const OVERDUE_SPEED = { easy: 0.6, normal: 1, hard: 1.5 };
+const DIFF_LABEL = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };
+/** The difficulty this game would pick for the next round: the bot level (Mixed counts as Normal). */
+const pickedDifficulty = () => (OVERDUE_SPEED[G.botLevel] ? G.botLevel : 'normal');
+/** Is the floor still waiting (a difficulty change would apply to this round)? */
+export const overdueWaiting = () => OD.t < OVERDUE_GRACE && G.round.timer <= 0;
+export const OD = {
+    t: 0, level: 0, collected: 0, dots: [], nextId: 1, over: false, endText: '',
+    diff: 'normal',                   // this round's difficulty (fixed for the round; the host's choice online)
+    bests: loadOverdueBests(),        // your best time at each difficulty
+    taken: new Map(),                 // dots we grabbed and told the host about (id -> when), hidden meanwhile
+    hostAt: 0,                        // the last host snapshot we followed
+    up: { x: 0, y: 0, w: 14, h: 18 }, // where a bot climbs when there is no dot worth going for
+};
+function loadOverdueBests() {
+    const out = { easy: 0, normal: 0, hard: 0 };
+    try {
+        const raw = localStorage.getItem(OD_BEST_KEY);
+        const v = raw && raw.trim().startsWith('{') ? JSON.parse(raw) : { normal: Number(raw) }; // older saves: one number (Normal speed)
+        for (const k of Object.keys(out)) { const n = Number(v?.[k]); if (n > 0 && n < 36000) out[k] = n; }
+    } catch (e) { /* storage blocked or garbage: start fresh */ }
+    return out;
+}
+/** How fast the floor rises (units a second): nothing during the grace period, then faster the longer it goes. */
+const overdueSpeed = (t) => (t < OVERDUE_GRACE ? 0 : Math.min(140, 18 + (t - OVERDUE_GRACE)) * OVERDUE_SPEED[OD.diff]);
+/** The y of the floor's surface. It is measured from the bottom of the screen, like shared positions. */
+export const overdueTop = () => view.h - OD.level;
+/** 6 dots for one player, one fewer for each extra runner (bots count), never fewer than 2. */
+const dotCount = () => clamp(7 - participants().length, 2, 6);
+function odReset() {
+    Object.assign(OD, { t: 0, level: 0, collected: 0, dots: [], over: false, endText: '', diff: pickedDifficulty() });
+    OD.taken.clear();
+}
+/** A new dot: standing on a card, a to-do item or the header, well above the floor, with room above it (not tucked
+ *  under another ledge, where nobody can reach it), and away from the other dots. */
+function placeDot() {
+    const top = overdueTop() - 150;
+    const surfaces = [...G.platforms, ...G.solids];
+    const spots = surfaces.filter((s) => s.w >= 30 && s.y > 30 && s.y < top);
+    const covered = (p, s) => surfaces.some((o) => o !== s && p.x + 14 > o.x && p.x < o.x + o.w && o.y < p.y + 18 && o.y + o.h > p.y - 30);
+    let p = null;
+    for (let i = 0; i < 24; i++) {
+        const s = spots[Math.floor(Math.random() * spots.length)];
+        p = s ? { x: s.x + Math.random() * (s.w - 14), y: s.y - 22 } : { x: 40 + Math.random() * (view.w - 100), y: 40 + Math.random() * Math.max(10, top - 60) };
+        if ((!s || !covered(p, s)) && OD.dots.every((d) => Math.hypot(d.x - p.x, d.y - p.y) > 110)) break;
+    }
+    OD.dots.push({ id: OD.nextId++, x: p.x, y: p.y, w: 14, h: 18 }); // a runner-sized box, so "touching" works
+}
+/** Every frame in Overdue: the floor, the dots, who is caught, and the rounds. */
+export function runOverdue(dt) {
+    if (!isOverdue()) return;
+    G.clock += dt;
+    const host = isHost();
+    if (!host) followHost();
+    const R = G.round;
+    if (R.timer > 0) {
+        R.timer -= dt;
+        if (R.timer <= 0 && host) startOverdueRound();
+        return;
+    }
+    if (host && OD.t < OVERDUE_GRACE) OD.diff = pickedDifficulty(); // a change before the floor moves counts for this round
+    OD.t += dt;
+    OD.level += overdueSpeed(OD.t) * dt; // the others run this too between the host's snapshots, so it moves smoothly
+    if (host) {
+        OD.dots = OD.dots.filter((d) => d.y + d.h < overdueTop() - 4); // the floor swallowed these...
+        while (OD.dots.length < dotCount()) placeDot();                 // ...new ones appear higher up
+    }
+    for (const [id, at] of OD.taken) if (G.clock - at > 1.5) OD.taken.delete(id); // the host never heard: show it again
+    for (const r of simulated()) {
+        if (r.out) continue;
+        for (const d of [...OD.dots]) if (!OD.taken.has(d.id) && touching(r, d)) grabDot(d, host);
+        if (OD.level > 0 && r.y + r.h > overdueTop() + 6) catchRunner(r);
+    }
+    // Nobody can be caught during the grace period, which also covers players who have not seen the new round yet.
+    if (host && OD.t > OVERDUE_GRACE && participants().every((p) => p.out)) endOverdueRound();
+}
+function grabDot(d, host) {
+    popText(d.x + 7, d.y - 4, 'ON TIME!', '#facc15', 0.8);
+    spawnParticles(d.x + 7, d.y + 9, '#facc15', 12);
+    if (host) collectDot(d.id);
+    else { OD.taken.set(d.id, G.clock); bridge.send({ type: 'od-dot', id: d.id, room: roomKey() }); }
+}
+function collectDot(id) {
+    const i = OD.dots.findIndex((d) => d.id === id);
+    if (i < 0) return;
+    OD.dots.splice(i, 1);
+    OD.level = Math.max(0, OD.level - OVERDUE_PUSH);
+    OD.collected++;
+    bridge.pushState();
+}
+/** Another player grabbed a dot. Only the host acts on it. */
+export function overdueDotTaken(id) {
+    if (!isOverdue() || !isHost() || G.round.timer > 0) return;
+    const d = OD.dots.find((x) => x.id === id);
+    if (!d) return;
+    spawnParticles(d.x + 7, d.y + 9, '#facc15', 12);
+    collectDot(id);
+}
+function catchRunner(r) {
+    r.out = true;
+    r.grapple.active = false;
+    popText(r.x + r.w / 2, r.y - 12, 'OVERDUE!', '#f87171', 1);
+    spawnParticles(r.x + r.w / 2, r.y + r.h / 2, '#ef4444', 22);
+    if (r === local) bridge.pushState();
+}
+function endOverdueRound() {
+    OD.endText = 'Overdue (' + DIFF_LABEL[OD.diff] + ')! The team lasted ' + OD.t.toFixed(1) + 's and was on time ' + OD.collected + 'x';
+    G.round.timer = ROUND_PAUSE;
+    roundOver();
+    bridge.pushState();
+}
+/** The round ended (here, or on the host): banner, and your best time. */
+function roundOver() {
+    OD.over = true;
+    G.round.text = OD.endText;
+    if (OD.t > OD.bests[OD.diff]) {
+        OD.bests[OD.diff] = +OD.t.toFixed(2);
+        G.round.text += ', a new best!';
+        try { localStorage.setItem(OD_BEST_KEY, JSON.stringify(OD.bests)); } catch (e) { /* storage blocked */ }
+    }
+    bridge.toast(G.round.text);
+}
+function startOverdueRound() {
+    resetRoundState(); // everyone here is back in, and the floor and dots start over
+    for (const rp of G.remotes.values()) rp.out = false;
+    bridge.respawn(); // back to the top of the screen (you and the bots), not where the floor caught you
+}
+/** What the host shares about the round, in its state snapshots. null for everyone else. */
+export function overdueSnapshot() {
+    if (!isOverdue() || !isHost()) return null;
+    return {
+        t: +OD.t.toFixed(2), lv: +OD.level.toFixed(1), c: OD.collected, d: OD.diff, end: +Math.max(0, G.round.timer).toFixed(2), txt: OD.endText,
+        dots: OD.dots.map((d) => [d.id, +(d.x / view.w).toFixed(4), +(view.h - d.y).toFixed(1)]),
+    };
+}
+/** Not the host: use the host's floor, dots and round state (checked first, it comes from the network). */
+function followHost() {
+    const h = [local, ...G.remotes.values()].sort((a, b) => a.id.localeCompare(b.id))[0];
+    const s = h && h.od;
+    if (!s || typeof s !== 'object' || h.odAt === OD.hostAt) return;
+    OD.hostAt = h.odAt;
+    const num = (v, hi) => clamp(Number(v) || 0, 0, hi);
+    const ending = num(s.end, ROUND_PAUSE) > 0;
+    if (!ending && OD.over) { resetRoundState(); bridge.respawn(); } // the host started a new round
+    OD.t = num(s.t, 36000);
+    OD.level = num(s.lv, 5000);
+    OD.collected = Math.floor(num(s.c, 1e6));
+    if (OVERDUE_SPEED[s.d]) OD.diff = s.d; // the host's difficulty
+    G.round.timer = num(s.end, ROUND_PAUSE);
+    if (ending && !OD.over) { OD.endText = String(s.txt || 'Overdue!').slice(0, 120); roundOver(); }
+    OD.dots = (Array.isArray(s.dots) ? s.dots : []).slice(0, 12).filter((d) => Array.isArray(d) && Number.isFinite(d[0]))
+        .map(([id, nx, by]) => ({ id, x: num(nx, 1) * view.w, y: view.h - num(by, view.h), w: 14, h: 18 }));
+    for (const id of OD.taken.keys()) if (!OD.dots.some((d) => d.id === id)) OD.taken.delete(id); // the host has it
+    OD.nextId = Math.max(OD.nextId, ...OD.dots.map((d) => d.id + 1)); // in case we become the host
+}
+/** Bots: go for a dot that is safely above the floor, preferring ones that are not far below them. When the floor
+ *  gets close, go for the highest dot, or just climb. */
+function overdueGoal(b) {
+    const feet = b.y + b.h;
+    const danger = feet > overdueTop() - 170;
+    const dots = OD.dots.filter((d) => !OD.taken.has(d.id) && d.y + d.h < overdueTop() - 110); // never dive at the floor
+    const cost = (d) => Math.hypot(d.x - b.x, d.y - b.y) + Math.max(0, d.y - b.y) * 1.5; // going down costs extra
+    let pick = !dots.length ? null : danger ? dots.reduce((a, d) => (d.y < a.y ? d : a)) : dots.reduce((a, d) => (cost(d) < cost(a) ? d : a));
+    if (!pick || (danger && pick.y + pick.h > feet - 20)) {
+        OD.up.x = clamp(b.x + (b.x < view.w / 2 ? 200 : -200), 20, view.w - 40);
+        OD.up.y = Math.max(0, b.y - 200);
+        pick = OD.up;
+    }
+    return { who: pick, chase: true };
+}
+function overdueDraw() {
+    if (OD.level > 0) { // the floor
+        const top = overdueTop();
+        ctx.save();
+        const wave = performance.now() * 0.004;
+        ctx.fillStyle = 'rgba(220, 38, 38, 0.34)';
+        ctx.beginPath();
+        ctx.moveTo(0, view.h);
+        for (let x = 0; x <= view.w; x += 20) ctx.lineTo(x, top + Math.sin(x * 0.03 + wave) * 4);
+        ctx.lineTo(view.w, view.h);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = 'rgba(254, 202, 202, 0.9)';
+        ctx.font = '900 12px Lato, sans-serif';
+        ctx.textAlign = 'center';
+        for (let x = 120; x < view.w; x += 320) ctx.fillText('OVERDUE', x, Math.min(view.h - 6, top + 22));
+        ctx.restore();
+    }
+    ctx.save();
+    for (const d of OD.dots) { // the "on time" dots
+        if (OD.taken.has(d.id)) continue;
+        const x = d.x + 7;
+        const y = d.y + 9 + Math.sin(performance.now() * 0.005 + d.id) * 2;
+        ctx.fillStyle = '#facc15';
+        ctx.strokeStyle = '#a16207';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(x, y, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(250, 204, 21, 0.45)';
+        ctx.beginPath();
+        ctx.arc(x, y, 9 + Math.sin(performance.now() * 0.008 + d.id), 0, Math.PI * 2);
+        ctx.stroke();
+    }
+    ctx.restore();
+    const R = G.round;
+    if (R.timer > 0) { hudPill(R.text + '   Next round in ' + Math.ceil(R.timer), 0, '#fde68a'); return; }
+    const risingIn = Math.ceil(OVERDUE_GRACE - OD.t);
+    const diff = DIFF_LABEL[OD.diff];
+    hudPill(risingIn > 0 ? 'Overdue (' + diff + ') rising in ' + risingIn + '... climb!' : 'OVERDUE (' + diff + ')   ' + OD.t.toFixed(1) + 's   on time ' + OD.collected + '   best ' + OD.bests[OD.diff].toFixed(1) + 's', 0, '#fecaca');
+    if (local.out) hudPill('Caught! The round ends when your whole team is caught', 1, '#fca5a5');
+    else if (OD.t < 12) hudPill('Grab the yellow dots to push the floor back down', 1, '#fde68a');
+}
+// ===========================================================================
 // PRACTICE BOTS
 // ===========================================================================
 // Each bot has a level (Easy, Normal, Hard, see AI_LEVELS): slower to react, slower on its feet, and less
@@ -1164,6 +1424,7 @@ const nearestOf = (from, list) => (list.length ? list.reduce((best, p) => (dist2
 
 /** Who this bot is going after (chase) or running from (flee). */
 function botGoal(b) {
+    if (isOverdue()) return overdueGoal(b);
     const others = participants().filter((p) => p !== b && !p.out);
     if (G.mode === 'infection' && G.swarm > 0) return { who: local, chase: true };
     if (b.isIt) return { who: nearestOf(b, others.filter((p) => !p.isIt && !p.frozen)) || local, chase: true };
@@ -1226,6 +1487,16 @@ export function botInput(bot, target, dt, chase = bot.isIt) {
         }
     }
 
+    // Under a card with the target above it: jumping only bumps its underside, so walk out from under it first.
+    if (hunting && dy < -35 && !bot.grapple.active) {
+        const roof = G.solids.find((s) => bot.x + bot.w > s.x && bot.x < s.x + s.w && s.y + s.h <= bot.y + 2 && s.y + s.h > bot.y - 160 && target.y < s.y + s.h);
+        if (roof) {
+            const toLeft = bot.x + bot.w - roof.x;
+            const toRight = roof.x + roof.w - bot.x;
+            left = toLeft < toRight || (toLeft === toRight && dx < 0);
+            right = !left;
+        }
+    }
     if (!hunting) { // keep away from the screen edges while fleeing
         if (bot.x < 110) { left = false; right = true; }
         if (bot.x > view.w - 130) { right = false; left = true; }
@@ -1263,7 +1534,7 @@ export function botInput(bot, target, dt, chase = bot.isIt) {
     }
 
     if (bot.aiJumpTimer <= 0 && !bot.grapple.active) {
-        const wallJump = bot.wallSide !== 0 && !targetBelow;
+        const wallJump = bot.wallSide !== 0 && !(hunting && dy > -10); // hunting: slide down the wall unless you are above
         if ((hunting && dy < -35) || (!hunting && dist < 150 && bot.grounded) || wallJump) {
             if (Math.random() < ai.jump) handleJump(bot);
             bot.aiJumpTimer = 0.35 + Math.random() * 0.35;
@@ -1292,7 +1563,7 @@ export function drawRunner(r, label = null) {
     const cx = x + w / 2;
     ctx.save();
     if (r.pauseTimer > 0 || r.ghost) ctx.globalAlpha = 0.55; // bot frozen after a tag, or a race ghost
-    if (r.out) ctx.globalAlpha = 0.28;                        // out of the round (Hot Potato)
+    if (r.out) ctx.globalAlpha = 0.28;                        // out of the round (Hot Potato, caught in Overdue)
 
     if (r.grounded && !r.sliding) {
         ctx.fillStyle = 'rgba(15, 23, 42, 0.22)';
@@ -1430,6 +1701,7 @@ function hudPill(text, row = 0, color = '#e2e8f0') {
 
 /** Round info for the tag variants. */
 export function drawVariantHud() {
+    if (isOverdue()) { overdueDraw(); return; }
     if (!isTag() || G.mode === 'tag') return;
     const all = participants();
     const alive = all.filter((p) => !p.out);
@@ -1464,13 +1736,6 @@ export function teleportLocal(clientX, clientY) {
     local.grapple.active = false;
 }
 
-export function resetTuning() { Object.assign(T, DEFAULTS); }
-
-/** Only the values that differ from the defaults, ready to paste into DEFAULTS. */
-export function changedTuning() {
-    return Object.fromEntries(Object.entries(T).filter(([k, v]) => v !== DEFAULTS[k]));
-}
-
 export function drawDebug() {
     if (!DEV) return;
     const d = G.dev;
@@ -1494,7 +1759,7 @@ export function drawDebug() {
         const lines = [
             `${G.fps.toFixed(0)} fps   ${G.mode}/${G.room}   players ${1 + G.remotes.size}`,
             `pos ${local.x.toFixed(0)}, ${local.y.toFixed(0)}   vel ${local.vx.toFixed(0)}, ${local.vy.toFixed(0)}`,
-            `grounded ${local.grounded}  wall ${local.wallSide}  jumps ${local.jumpsLeft}  dash ${labOn() && PF.dashMode === 'charges' ? 'charge ' + local.dashCharges : 'cd ' + Math.max(0, local.dashCooldown).toFixed(2)}`,
+            `grounded ${local.grounded}  wall ${local.wallSide}  jumps ${local.jumpsLeft}  dash ${pfOn() && PF.dashMode === 'charges' ? 'charge ' + local.dashCharges : 'cd ' + Math.max(0, local.dashCooldown).toFixed(2)}`,
             `world ${view.w.toFixed(0)}x${view.h.toFixed(0)}  scale ${view.s.toFixed(2)}  solids ${G.solids.length}  ledges ${G.platforms.length}`,
         ];
         ctx.font = '600 10px ui-monospace, Consolas, monospace';
@@ -1513,7 +1778,8 @@ export function drawDebug() {
 // ===========================================================================
 // The Platformer plays on its own level instead of the page. A level is a plain JSON file (see README):
 //   cards   solid boxes        ledges  one-way platforms      springs  bouncy pads
-//   flags   checkpoints, in order (the last one finishes the race)       pickups  coins for the Overdue game
+//   flags   checkpoints, in order (the last one finishes the race)       pickups  coins (editor only for now)
+//   boosts  speed boost zones you pass through: they bring you up to their speed (power) their way (dir, in degrees)
 //   spawn   where you start (the point your feet stand on)
 // Every level is LEVEL_W x LEVEL_H design units, (0, 0) is the top-left corner and the floor is y = LEVEL_H.
 // Anything that comes from outside (a file, a link, another player) goes through sanitizeLevel first.
@@ -1535,8 +1801,10 @@ export function defaultLevel() {
         ],
         ledges: [],
         springs: [],
+        boosts: [],
         flags: [{ x: 960, y: 500 }],
         pickups: [],
+        texts: [],
     };
 }
 
@@ -1545,14 +1813,39 @@ const finite = (v, lo, hi, fallback) => {
     return Number.isFinite(n) ? Math.round(clamp(n, lo, hi) * 10) / 10 : fallback;
 };
 
-function cleanRect(o, minW, minH, fixedH) {
+function cleanRect(o, minW, minH, fixedH, isCard = false) {
     if (!o || typeof o !== 'object') return null;
     const w = finite(o.w, minW, LEVEL_W, NaN);
     const h = fixedH ?? finite(o.h, minH, LEVEL_H, NaN);
     const x = finite(o.x, 0, LEVEL_W - w, NaN);
     const y = finite(o.y, 0, LEVEL_H - h, NaN);
     if (![w, h, x, y].every(Number.isFinite)) return null;
-    return { x, y, w, h, dim: DIMS.includes(o.dim) ? o.dim : 'both' };
+    const rect = { x, y, w, h, dim: DIMS.includes(o.dim) ? o.dim : 'both' };
+    if (isCard && o.noWallJump === true) rect.noWallJump = true; // these two are only written when they are on
+    if (isCard && o.noGrapple === true) rect.noGrapple = true;
+    return rect;
+}
+
+/** Speed boosts: 8 directions (degrees, 0 = right, 90 = up), power in speed units. */
+export const BOOST_DIRS = [0, 45, 90, 135, 180, 225, 270, 315];
+export const BOOST_POWER = { min: 100, max: 2000, def: 700 };
+const BOOST_MAX_SPEED = 2400; // a safety cap on total speed after a push (no tunnelling through cards)
+function cleanBoost(o) {
+    const rect = cleanRect(o, 16, 16);
+    if (!rect) return null;
+    const dir = Number(o.dir);
+    rect.dir = BOOST_DIRS.includes(dir) ? dir : 0;
+    rect.power = finite(o.power, BOOST_POWER.min, BOOST_POWER.max, BOOST_POWER.def);
+    return rect;
+}
+/** A line of text on the map (decoration and hints). */
+function cleanText(o) {
+    if (!o || typeof o !== 'object') return null;
+    const x = finite(o.x, 0, LEVEL_W, NaN);
+    const y = finite(o.y, 0, LEVEL_H, NaN);
+    const text = String(o.text ?? '').replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 80);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !text) return null;
+    return { x, y, text, size: finite(o.size, 8, 96, 20) };
 }
 
 function cleanPoint(o) {
@@ -1568,16 +1861,18 @@ const cleanList = (list, fn) => (Array.isArray(list) ? list.slice(0, MAX_OBJECTS
  *  from the input (extra keys, huge lists, odd types) survives. */
 export function sanitizeLevel(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-    if (!['spawn', 'cards', 'ledges', 'springs', 'flags', 'pickups'].some((k) => k in raw)) return null; // not a level at all
+    if (!['spawn', 'cards', 'ledges', 'springs', 'boosts', 'flags', 'pickups', 'texts'].some((k) => k in raw)) return null; // not a level at all
     const name = String(raw.name ?? 'Untitled').replace(/[^\w .\-]/g, '').trim().slice(0, 40) || 'Untitled';
     return {
         name,
         spawn: cleanPoint(raw.spawn) || { x: 100, y: LEVEL_H },
-        cards: cleanList(raw.cards, (o) => cleanRect(o, 8, 8)),
+        cards: cleanList(raw.cards, (o) => cleanRect(o, 8, 8, undefined, true)),
         ledges: cleanList(raw.ledges, (o) => cleanRect(o, 8, 4, 12)),
         springs: cleanList(raw.springs, (o) => cleanRect(o, 16, 4, 14)),
+        boosts: cleanList(raw.boosts, cleanBoost),
         flags: cleanList(raw.flags, cleanPoint),
         pickups: cleanList(raw.pickups, cleanPoint),
+        texts: cleanList(raw.texts, cleanText),
     };
 }
 
@@ -1593,7 +1888,14 @@ export const LEVEL = { data: defaultLevel() };
 
 /** The built-in maps in play order (read from maps/index.json). index is -1 while you are on your own map. */
 export const MAPS = { list: [{ name: LEVEL.data.name, level: defaultLevel() }], index: 0 };
-PF.race.sig = levelSignature(); // the ghost belongs to this exact map
+
+// --- best times -------------------------------------------------------------
+// Every map (told apart by its layout, not its name) keeps your best time and the ghost of that run in the
+// browser. Change anything about a map's layout and it is a different map with no time yet. Names and text
+// are decoration and do not count.
+const RECORDS_KEY = 'scb-records';
+const RECORDS = loadRecords();
+syncRecord(); // load this map's best time and ghost
 
 function saveLevelLocal() {
     try { localStorage.setItem(LEVEL_KEY, levelToJson()); } catch (e) {}
@@ -1611,8 +1913,10 @@ export function levelToJson(L = LEVEL.data) {
   "cards": ${rows(L.cards)},
   "ledges": ${rows(L.ledges)},
   "springs": ${rows(L.springs)},
+  "boosts": ${rows(L.boosts)},
   "flags": ${rows(L.flags)},
-  "pickups": ${rows(L.pickups)}
+  "pickups": ${rows(L.pickups)},
+  "texts": ${rows(L.texts)}
 }
 `;
 }
@@ -1623,8 +1927,9 @@ function setLevel(data, index = -1) {
     LEVEL.data = data;
     MAPS.index = index;
     PF.dim = 0;
-    EDIT.sel = null;
+    setSel([]);
     EDIT.drag = null;
+    EDIT.box = null;
     levelChanged(false);
 }
 
@@ -1639,7 +1944,7 @@ export function applyLevel(raw) {
 }
 
 export function clearLevel() {
-    setLevel({ name: 'Untitled', spawn: { x: 100, y: LEVEL_H }, cards: [], ledges: [], springs: [], flags: [], pickups: [] });
+    setLevel({ name: 'Untitled', spawn: { x: 100, y: LEVEL_H }, cards: [], ledges: [], springs: [], boosts: [], flags: [], pickups: [], texts: [] });
     saveLevelLocal();
 }
 
@@ -1650,32 +1955,89 @@ export function setLevelName(name) {
     bridge.mapChanged();
 }
 
-/** Anything about the map that matters for a race. The ghost only makes sense on exactly this map. */
+/** Anything about the map that matters for a race. A best time only makes sense on exactly this layout. */
 function levelSignature(L = LEVEL.data) {
-    return JSON.stringify([L.spawn, L.cards, L.ledges, L.springs, L.flags, L.pickups]);
+    const parts = [L.spawn, L.cards, L.ledges, L.springs, L.flags, L.pickups]; // not the name or the texts
+    if (L.boosts.length) parts.push(L.boosts); // only when there are any, so maps without boosts keep their best times
+    return JSON.stringify(parts);
 }
 
-/** Forget the best time and the ghost. Happens by itself whenever the map changes; also on the G key. */
-export function resetGhost(announce = false) {
+/** A short code for a map's layout, used to find its best time. */
+export function mapKey(L = LEVEL.data) {
+    const s = levelSignature(L);
+    return hashString(s).toString(36) + '.' + s.length;
+}
+
+function loadRecords() {
+    const out = {};
+    try {
+        const raw = JSON.parse(localStorage.getItem(RECORDS_KEY) || '{}');
+        for (const [key, rec] of Object.entries(raw).slice(0, 100)) { // anything odd in storage is ignored
+            if (!/^[a-z0-9]{1,10}\.\d{1,6}$/.test(key) || !rec || typeof rec !== 'object') continue;
+            const best = Number(rec.best);
+            if (!(best > 0 && best < 3600)) continue;
+            const ghost = Array.isArray(rec.ghost)
+                ? rec.ghost.slice(0, 3000).filter((g) => Array.isArray(g) && Number.isFinite(g[0]) && Number.isFinite(g[1])).map((g) => [g[0], g[1], g[2] === -1 ? -1 : 1])
+                : [];
+            out[key] = { best, ghost, at: Number(rec.at) || 0 };
+        }
+    } catch (e) { /* no storage, or it holds garbage: start empty */ }
+    return out;
+}
+
+function saveRecords() {
+    const keep = new Set(MAPS.list.map((m) => mapKey(m.level))); // the campaign's times are never dropped
+    const keys = Object.keys(RECORDS);
+    if (keys.length > 60) { // maps from the editor pile up: drop the oldest of those
+        keys.filter((k) => !keep.has(k)).sort((a, b) => RECORDS[a].at - RECORDS[b].at).slice(0, keys.length - 60).forEach((k) => delete RECORDS[k]);
+    }
+    try { localStorage.setItem(RECORDS_KEY, JSON.stringify(RECORDS)); } catch (e) { /* storage full or blocked */ }
+}
+
+/** Load the best time and ghost that belong to the map on screen. */
+function syncRecord() {
     const R = PF.race;
-    const had = R.ghost.length > 0 || R.best !== null;
-    R.best = null;
-    R.ghost = [];
-    R.rec = [];
+    const rec = RECORDS[mapKey()];
     R.sig = levelSignature();
-    if (announce) bridge.toast('Ghost reset');
-    else if (had) bridge.toast('The map changed, so the ghost was reset');
+    R.best = rec ? rec.best : null;
+    R.ghost = rec ? rec.ghost : [];
+    R.rec = [];
+}
+
+/** Best time on a map (a level object), or null. */
+export const bestTimeOf = (L) => RECORDS[mapKey(L)]?.best ?? null;
+
+/** The campaign: your best time on each built-in map, and their total once every map has one. */
+export function campaign() {
+    const rows = MAPS.list.map((m) => ({ name: m.name, best: bestTimeOf(m.level) }));
+    const done = rows.filter((r) => r.best !== null).length;
+    return { rows, done, total: rows.length, sum: rows.length && done === rows.length ? rows.reduce((s, r) => s + r.best, 0) : null };
+}
+
+/** Forget the best time and ghost of a map (the one on screen unless told otherwise). */
+export function resetRecord(L = LEVEL.data) {
+    const key = mapKey(L);
+    const had = !!RECORDS[key];
+    delete RECORDS[key];
+    saveRecords();
+    if (key === mapKey()) { PF.race.best = null; PF.race.ghost = []; PF.race.rec = []; }
+    bridge.mapChanged();
     return had;
 }
 
-/** The map changed: rebuild the collision world, and drop the ghost if it no longer fits this map. */
+/** 4.32s, or 1:05.32 */
+export function fmtTime(s) {
+    return s >= 60 ? `${Math.floor(s / 60)}:${(s % 60).toFixed(2).padStart(5, '0')}` : `${s.toFixed(2)}s`;
+}
+
+/** The map changed: rebuild the collision world and load that map's best time and ghost. */
 function levelChanged(edited = true) {
     scanWorld();
     if (edited) { // you changed a map: it is now your own copy, and it is remembered by the browser
         MAPS.index = -1;
         saveLevelLocal();
     }
-    if (levelSignature() !== PF.race.sig) resetGhost(false);
+    if (levelSignature() !== PF.race.sig) syncRecord(); // a different layout: a different best time
     bridge.mapChanged();
 }
 
@@ -1709,6 +2071,9 @@ export const nextMap = (step = 1) => selectMap((MAPS.index < 0 ? 0 : MAPS.index)
 /** Back to the first built-in map (the editor's "First map" button). */
 export function resetLevel() { loadMap(0); }
 
+/** Is there a map of your own saved in this browser? */
+export const hasSavedMap = () => !!loadSavedLevel();
+
 /** Go back to the map you last edited or loaded. */
 export function useSavedMap() {
     const saved = loadSavedLevel();
@@ -1736,42 +2101,66 @@ function buildLevelWorld() {
     const cur = PF.dim ? 'b' : 'a';
     const show = (o) => !useDim || o.dim === 'both' || o.dim === cur;
     const box = (o, extra = {}) => ({ x: o.x, y: o.y, w: o.w, h: o.h, ...extra });
-    G.solids = L.cards.filter(show).map((o) => box(o));
+    G.solids = L.cards.filter(show).map((o) => box(o, { noWallJump: !!o.noWallJump, noGrapple: !!o.noGrapple }));
     G.platforms = [...L.ledges.filter(show).map((o) => box(o)), ...L.springs.filter(show).map((o) => box(o, { spring: true }))];
     PF.pickups = L.pickups.map((p, id) => ({ id, x: p.x, y: p.y }));
+    PF.boosts = L.boosts.map((o, id) => ({ ...o, id })).filter(show);
 }
 
 // --- editor model ----------------------------------------------------------
-// The app draws the toolbar and forwards the pointer; everything about what a click does is here.
-export const EDIT = { on: false, tool: 'select', snap: 10, dim: 'both', sel: null, drag: null, hover: { x: 0, y: 0 } };
+// The app draws the toolbar and forwards the pointer and keys; everything about what a click does is here.
+// Selection: sels is everything selected, sel is the last one picked. Select tool: click to pick, shift-click
+// to add or remove, drag on empty space to box-select, drag a selected thing to move the whole selection.
+export const EDIT = {
+    on: false, tool: 'select', snap: 10, dim: 'both',
+    sel: null, sels: [], drag: null, box: null,
+    boostDir: 0, boostPower: BOOST_POWER.def, // what the next boost gets (the last ones you picked)
+    clip: null, pasteCount: 0, hover: { x: 0, y: 0 }, hoverSet: false,
+};
 
-const TOOL_KIND = { card: 'cards', ledge: 'ledges', spring: 'springs', flag: 'flags', pickup: 'pickups' };
+const TOOL_KIND = { card: 'cards', nwcard: 'cards', ledge: 'ledges', spring: 'springs', boost: 'boosts', flag: 'flags', pickup: 'pickups' };
 const RECT_SPEC = {
     cards: { minW: 16, minH: 16, defW: 160, defH: 120 },
     ledges: { minW: 16, fixedH: 12, defW: 120 },
     springs: { minW: 24, fixedH: 14, defW: 80 },
+    boosts: { minW: 16, minH: 16, defW: 60, defH: 60 },
 };
+const LISTS = ['cards', 'ledges', 'springs', 'boosts', 'flags', 'pickups', 'texts'];
 const isRectKind = (k) => k in RECT_SPEC;
 const snapv = (v) => (EDIT.snap ? Math.round(v / EDIT.snap) * EDIT.snap : Math.round(v));
+const same = (a, b) => a.kind === b.kind && a.index === b.index;
+const getItem = (ref) => (ref.kind === 'spawn' ? LEVEL.data.spawn : LEVEL.data[ref.kind]?.[ref.index]);
+
+function setSel(list) {
+    EDIT.sels = list;
+    EDIT.sel = list.length ? list[list.length - 1] : null;
+}
 
 export function setEditing(on) {
     EDIT.on = !!on;
     EDIT.drag = null;
-    if (!on) EDIT.sel = null;
+    EDIT.box = null;
+    if (!on) setSel([]);
     scanWorld(); // everything is solid while editing, the dimension filter returns afterwards
 }
 
 export function setEditorTool(tool) {
     EDIT.tool = tool;
     EDIT.drag = null;
+    EDIT.box = null;
 }
 
-/** The selected object: { kind, index, item } or null. */
+/** The one selected object (for the number boxes): { kind, index, item }. Null if nothing or several are selected. */
 export function selectedItem() {
-    const s = EDIT.sel;
-    if (!s) return null;
-    const item = s.kind === 'spawn' ? LEVEL.data.spawn : LEVEL.data[s.kind]?.[s.index];
-    return item ? { kind: s.kind, index: s.index, item } : null;
+    if (EDIT.sels.length !== 1) return null;
+    const ref = EDIT.sels[0];
+    const item = getItem(ref);
+    return item ? { ...ref, item } : null;
+}
+
+/** Everything that is selected: [{ kind, index, item }]. */
+export function selectedItems() {
+    return EDIT.sels.map((ref) => ({ ...ref, item: getItem(ref) })).filter((s) => s.item);
 }
 
 /** The area an object occupies (for picking and for drawing the selection). */
@@ -1779,33 +2168,29 @@ function boundsOf(kind, o) {
     if (kind === 'spawn') return { x: o.x - 8, y: o.y - STAND_H, w: 16, h: STAND_H };
     if (kind === 'flags') return { x: o.x - 12, y: o.y - 34, w: 30, h: 34 };
     if (kind === 'pickups') return { x: o.x - 9, y: o.y - 9, w: 18, h: 18 };
+    if (kind === 'texts') return { x: o.x, y: o.y - o.size, w: Math.max(16, o.text.length * o.size * 0.56), h: o.size * 1.3 };
     return { x: o.x, y: o.y, w: o.w, h: o.h };
 }
 
 const inside = (b, x, y, pad = 0) => x >= b.x - pad && x <= b.x + b.w + pad && y >= b.y - pad && y <= b.y + b.h + pad;
+const intersects = (a, b) => a.x <= b.x + b.w && a.x + a.w >= b.x && a.y <= b.y + b.h && a.y + a.h >= b.y;
 
 /** What is under this point? Thin things (springs, ledges) win over cards; the corner of a box is a resize handle. */
 function hitTest(x, y) {
     const L = LEVEL.data;
     if (inside(boundsOf('spawn', L.spawn), x, y, 2)) return { kind: 'spawn' };
-    for (const kind of ['flags', 'pickups']) {
+    for (const kind of ['texts', 'flags', 'pickups']) {
         for (let i = L[kind].length - 1; i >= 0; i--) if (inside(boundsOf(kind, L[kind][i]), x, y, 2)) return { kind, index: i };
     }
-    for (const kind of ['springs', 'ledges', 'cards']) {
+    for (const kind of ['springs', 'ledges', 'boosts', 'cards']) {
         for (let i = L[kind].length - 1; i >= 0; i--) {
             const o = L[kind][i];
             if (!inside(boundsOf(kind, o), x, y, kind === 'cards' ? 0 : 3)) continue;
             const handle = x >= o.x + o.w - 10 && y >= o.y + o.h - 10 && o.w >= 24;
-            return { kind, index: i, handle: handle && kind !== 'spawn' };
+            return { kind, index: i, handle };
         }
     }
     return null;
-}
-
-function removeItem({ kind, index }) {
-    if (kind === 'spawn') return;
-    LEVEL.data[kind].splice(index, 1);
-    EDIT.sel = null;
 }
 
 /** Keep an object inside the level. */
@@ -1821,103 +2206,284 @@ function fit(kind, o) {
     } else {
         o.x = clamp(o.x, 0, LEVEL_W);
         o.y = clamp(o.y, 0, LEVEL_H);
+        if (kind === 'texts') o.size = clamp(Number(o.size) || 20, 8, 96);
     }
 }
 
-/** Pointer events in design units. type: 'down' | 'move' | 'up'. */
-export function editorPointer(type, rawX, rawY) {
+/** The box a group of objects covers (points count as a single spot). */
+function groupExtent(entries) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const { kind, o } of entries) {
+        const w = isRectKind(kind) ? o.w : 0;
+        const h = isRectKind(kind) ? o.h : 0;
+        minX = Math.min(minX, o.x);
+        minY = Math.min(minY, o.y);
+        maxX = Math.max(maxX, o.x + w);
+        maxY = Math.max(maxY, o.y + h);
+    }
+    return { minX, minY, maxX, maxY };
+}
+
+/** Move objects from their starting positions by (dx, dy), keeping the whole group inside the level.
+ *  Returns the shift that was actually used. */
+function shiftGroup(refs, origs, dx, dy) {
+    const ex = groupExtent(refs.map((r, i) => ({ kind: r.kind, o: origs[i] })));
+    const sx = clamp(dx, -ex.minX, LEVEL_W - ex.maxX);
+    const sy = clamp(dy, -ex.minY, LEVEL_H - ex.maxY);
+    refs.forEach((r, i) => {
+        const it = getItem(r);
+        it.x = origs[i].x + sx;
+        it.y = origs[i].y + sy;
+        fit(r.kind, it);
+    });
+    return { dx: sx, dy: sy };
+}
+
+function removeItem({ kind, index }) {
+    if (kind === 'spawn') return;
+    LEVEL.data[kind].splice(index, 1);
+    setSel([]);
+}
+
+/** Select everything the box touches (plus anything that was already selected with shift). */
+function selectInBox(base) {
+    const b = EDIT.box;
+    const area = { x: Math.min(b.x1, b.x2), y: Math.min(b.y1, b.y2), w: Math.abs(b.x2 - b.x1), h: Math.abs(b.y2 - b.y1) };
+    const L = LEVEL.data;
+    const found = [];
+    if (intersects(boundsOf('spawn', L.spawn), area)) found.push({ kind: 'spawn' });
+    for (const kind of LISTS) L[kind].forEach((o, index) => { if (intersects(boundsOf(kind, o), area)) found.push({ kind, index }); });
+    const merged = [...base];
+    for (const f of found) if (!merged.some((s) => same(s, f))) merged.push(f);
+    setSel(merged);
+}
+
+/** Pointer events in design units. type: 'down' | 'move' | 'up'. additive (shift / ctrl held) adds to the selection. */
+export function editorPointer(type, rawX, rawY, additive = false) {
     if (!EDIT.on) return;
     const x = clamp(rawX, 0, LEVEL_W);
     const y = clamp(rawY, 0, LEVEL_H);
     EDIT.hover = { x, y };
+    EDIT.hoverSet = true;
     const L = LEVEL.data;
 
     if (type === 'down') {
         const tool = EDIT.tool;
         if (tool === 'select') {
             const hit = hitTest(x, y);
-            EDIT.sel = hit ? { kind: hit.kind, index: hit.index } : null;
-            EDIT.drag = hit ? { mode: hit.handle ? 'resize' : 'move', sx: x, sy: y, orig: { ...selectedItem().item } } : null;
+            if (hit) {
+                const ref = { kind: hit.kind, index: hit.index };
+                const picked = EDIT.sels.some((s) => same(s, ref));
+                if (additive && picked) { setSel(EDIT.sels.filter((s) => !same(s, ref))); EDIT.drag = null; return; }
+                if (additive) setSel([...EDIT.sels, ref]);
+                else if (!picked) setSel([ref]);
+                const resize = hit.handle && EDIT.sels.length === 1 && hit.kind !== 'spawn';
+                // A plain click (no drag) on one thing of a group picks just that thing; dragging moves the whole group.
+                const collapse = picked && EDIT.sels.length > 1 ? ref : null;
+                EDIT.drag = { mode: resize ? 'resize' : 'move', sx: x, sy: y, origs: EDIT.sels.map((s) => ({ ...getItem(s) })), changed: false, collapse };
+            } else { // empty space: draw a selection box
+                const base = additive ? [...EDIT.sels] : [];
+                setSel(base);
+                EDIT.drag = { mode: 'box', base };
+                EDIT.box = { x1: x, y1: y, x2: x, y2: y };
+            }
         } else if (tool === 'erase') {
             const hit = hitTest(x, y);
             if (hit && hit.kind !== 'spawn') { removeItem(hit); levelChanged(); }
         } else if (tool === 'spawn') {
             L.spawn = { x: snapv(x), y: snapv(y) };
             fit('spawn', L.spawn);
-            EDIT.sel = { kind: 'spawn' };
-            EDIT.drag = { mode: 'move', sx: x, sy: y, orig: { ...L.spawn } };
+            setSel([{ kind: 'spawn' }]);
+            EDIT.drag = { mode: 'move', sx: x, sy: y, origs: [{ ...L.spawn }], changed: true };
+        } else if (tool === 'text') {
+            if (L.texts.length >= MAX_OBJECTS) return;
+            const p = { x: snapv(x), y: snapv(y), text: 'Text', size: 20 };
+            fit('texts', p);
+            L.texts.push(p);
+            setSel([{ kind: 'texts', index: L.texts.length - 1 }]);
+            EDIT.drag = { mode: 'move', sx: x, sy: y, origs: [{ ...p }], changed: true };
         } else if (tool === 'flag' || tool === 'pickup') {
             const kind = TOOL_KIND[tool];
             if (L[kind].length >= MAX_OBJECTS) return;
             const p = { x: snapv(x), y: snapv(y) };
             fit(kind, p);
             L[kind].push(p);
-            EDIT.sel = { kind, index: L[kind].length - 1 };
-            EDIT.drag = { mode: 'move', sx: x, sy: y, orig: { ...p } };
+            setSel([{ kind, index: L[kind].length - 1 }]);
+            EDIT.drag = { mode: 'move', sx: x, sy: y, origs: [{ ...p }], changed: true };
         } else if (TOOL_KIND[tool]) { // card, ledge, spring: drag out a box
             const kind = TOOL_KIND[tool];
             if (L[kind].length >= MAX_OBJECTS) return;
             const o = { x: snapv(x), y: snapv(y), w: 0, h: RECT_SPEC[kind].fixedH ?? 0, dim: EDIT.dim };
+            if (tool === 'nwcard') o.noWallJump = true;
+            if (kind === 'boosts') { o.dir = EDIT.boostDir; o.power = EDIT.boostPower; }
             L[kind].push(o);
-            EDIT.sel = { kind, index: L[kind].length - 1 };
-            EDIT.drag = { mode: 'create', sx: o.x, sy: o.y };
+            setSel([{ kind, index: L[kind].length - 1 }]);
+            EDIT.drag = { mode: 'create', sx: o.x, sy: o.y, changed: true };
         }
         return;
     }
 
     const d = EDIT.drag;
-    const sel = selectedItem();
-    if (!d || !sel) { if (type === 'up') EDIT.drag = null; return; }
-    const { kind, item } = sel;
+    if (!d) return;
 
     if (type === 'move') {
-        if (d.mode === 'create') {
-            const spec = RECT_SPEC[kind];
-            const x2 = snapv(x);
-            const y2 = snapv(y);
-            item.x = Math.min(d.sx, x2);
-            item.w = Math.abs(x2 - d.sx);
-            if (!spec.fixedH) { item.y = Math.min(d.sy, y2); item.h = Math.abs(y2 - d.sy); }
+        if (d.mode === 'box') {
+            EDIT.box.x2 = x;
+            EDIT.box.y2 = y;
+            selectInBox(d.base);
         } else if (d.mode === 'move') {
-            item.x = snapv(d.orig.x + (x - d.sx));
-            item.y = snapv(d.orig.y + (y - d.sy));
-            if (isRectKind(kind)) { item.w = d.orig.w; item.h = d.orig.h; }
-            fit(kind, item);
-        } else if (d.mode === 'resize') {
-            item.w = snapv(d.orig.w + (x - d.sx));
-            if (!RECT_SPEC[kind].fixedH) item.h = snapv(d.orig.h + (y - d.sy));
-            fit(kind, item);
+            const first = d.origs[0];
+            const used = shiftGroup(EDIT.sels, d.origs, snapv(first.x + (x - d.sx)) - first.x, snapv(first.y + (y - d.sy)) - first.y);
+            if (used.dx || used.dy) d.changed = true;
+        } else {
+            const sel = selectedItem();
+            if (!sel) return;
+            const { kind, item } = sel;
+            if (d.mode === 'create') {
+                const spec = RECT_SPEC[kind];
+                const x2 = snapv(x);
+                const y2 = snapv(y);
+                item.x = Math.min(d.sx, x2);
+                item.w = Math.abs(x2 - d.sx);
+                if (!spec.fixedH) { item.y = Math.min(d.sy, y2); item.h = Math.abs(y2 - d.sy); }
+            } else if (d.mode === 'resize') {
+                const o = d.origs[0];
+                item.w = snapv(o.w + (x - d.sx));
+                if (!RECT_SPEC[kind].fixedH) item.h = snapv(o.h + (y - d.sy));
+                fit(kind, item);
+                if (item.w !== o.w || item.h !== o.h) d.changed = true;
+            }
         }
     } else if (type === 'up') {
-        if (d.mode === 'create') { // a plain click makes a default-sized box
-            const spec = RECT_SPEC[kind];
-            if (item.w < 10 && (spec.fixedH || item.h < 10)) { item.w = spec.defW; item.h = spec.fixedH ?? spec.defH; }
-            fit(kind, item);
-        }
         EDIT.drag = null;
-        levelChanged();
+        if (d.mode === 'box') { EDIT.box = null; return; }
+        if (d.collapse && !d.changed) setSel([d.collapse]);
+        if (d.mode === 'create') { // a plain click makes a default-sized box
+            const sel = selectedItem();
+            if (sel) {
+                const spec = RECT_SPEC[sel.kind];
+                if (sel.item.w < 10 && (spec.fixedH || sel.item.h < 10)) { sel.item.w = spec.defW; sel.item.h = spec.fixedH ?? spec.defH; }
+                fit(sel.kind, sel.item);
+            }
+        }
+        if (d.changed) levelChanged(); // only a real change makes it "your map" and resets the ghost
     }
 }
 
-/** Delete key / button: remove the selected object. */
+/** Delete key / button: remove everything selected (the start point stays). */
 export function editorDelete() {
-    const sel = selectedItem();
-    if (!sel || sel.kind === 'spawn') return false;
-    removeItem(sel);
+    const refs = EDIT.sels.filter((s) => s.kind !== 'spawn');
+    if (!refs.length) return false;
+    const byKind = {};
+    for (const r of refs) (byKind[r.kind] = byKind[r.kind] || []).push(r.index);
+    for (const [kind, indexes] of Object.entries(byKind)) {
+        for (const i of indexes.sort((a, b) => b - a)) LEVEL.data[kind].splice(i, 1); // from the end, so the numbers stay valid
+    }
+    setSel([]);
     levelChanged();
     return true;
 }
 
-/** Number boxes and the dimension picker: change the selected object. */
-export function updateSelected(patch) {
-    const sel = selectedItem();
-    if (!sel) return false;
-    const { kind, item } = sel;
-    for (const k of ['x', 'y', 'w', 'h']) {
-        if (k in patch && Number.isFinite(Number(patch[k])) && (isRectKind(kind) || k === 'x' || k === 'y')) item[k] = Number(patch[k]);
+/** Ctrl+C: remember what is selected (not the start point). Returns how many things. */
+export function editorCopy() {
+    const items = selectedItems().filter((s) => s.kind !== 'spawn');
+    if (!items.length) return 0;
+    EDIT.clip = items.map((s) => ({ kind: s.kind, item: JSON.parse(JSON.stringify(s.item)) }));
+    EDIT.pasteCount = 0;
+    return items.length;
+}
+
+/** Ctrl+X: copy, then delete. */
+export function editorCut() {
+    const n = editorCopy();
+    if (n) editorDelete();
+    return n;
+}
+
+/** Ctrl+V: put the copied things down and select them. With a position, the group's top-left corner goes
+ *  there; without one, each paste lands a little further along so copies do not hide each other. */
+export function editorPaste(atX = null, atY = null) {
+    const clip = EDIT.clip;
+    if (!clip || !clip.length) return 0;
+    const ex = groupExtent(clip.map((c) => ({ kind: c.kind, o: c.item })));
+    EDIT.pasteCount++;
+    const step = Math.max(EDIT.snap || 0, 10);
+    const tx = atX === null ? ex.minX + step * EDIT.pasteCount : snapv(atX);
+    const ty = atY === null ? ex.minY + step * EDIT.pasteCount : snapv(atY);
+    const dx = clamp(tx - ex.minX, -ex.minX, LEVEL_W - ex.maxX);
+    const dy = clamp(ty - ex.minY, -ex.minY, LEVEL_H - ex.maxY);
+    const made = [];
+    for (const c of clip) {
+        if (LEVEL.data[c.kind].length >= MAX_OBJECTS) continue;
+        const item = JSON.parse(JSON.stringify(c.item));
+        item.x += dx;
+        item.y += dy;
+        fit(c.kind, item);
+        LEVEL.data[c.kind].push(item);
+        made.push({ kind: c.kind, index: LEVEL.data[c.kind].length - 1 });
     }
-    if (patch.dim && DIMS.includes(patch.dim) && isRectKind(kind)) item.dim = patch.dim;
-    fit(kind, item);
+    if (!made.length) return 0;
+    setSel(made);
+    levelChanged();
+    return made.length;
+}
+
+/** Ctrl+D: copy and paste in one go, a little to the side. */
+export function editorDuplicate() {
+    return editorCopy() ? editorPaste(null, null) : 0;
+}
+
+/** Ctrl+A: select everything. */
+export function editorSelectAll() {
+    const refs = [{ kind: 'spawn' }];
+    for (const kind of LISTS) LEVEL.data[kind].forEach((_, index) => refs.push({ kind, index }));
+    setSel(refs);
+    return refs.length;
+}
+
+export function editorSelectNone() { setSel([]); }
+
+/** Arrow keys: move the selection by one snap step (one unit if snap is off). */
+export function editorNudge(sx, sy) {
+    const items = selectedItems();
+    if (!items.length) return false;
+    const step = EDIT.snap || 1;
+    const used = shiftGroup(EDIT.sels, items.map((s) => ({ ...s.item })), sx * step, sy * step);
+    if (used.dx || used.dy) levelChanged();
+    return true;
+}
+
+/** Number boxes, the text box and the pickers. Position, size and text apply to one selected thing; the
+ *  dimension and "no wall jump" apply to everything selected. */
+export function updateSelected(patch) {
+    const items = selectedItems();
+    if (!items.length) return false;
+    if (patch.dim && DIMS.includes(patch.dim)) for (const s of items) if (isRectKind(s.kind)) s.item.dim = patch.dim;
+    for (const flag of ['noWallJump', 'noGrapple']) { // card switches: stored only when on
+        if (typeof patch[flag] !== 'boolean') continue;
+        for (const s of items) if (s.kind === 'cards') { if (patch[flag]) s.item[flag] = true; else delete s.item[flag]; }
+    }
+    const boostsSel = items.filter((s) => s.kind === 'boosts');
+    if ('dir' in patch && BOOST_DIRS.includes(Number(patch.dir))) {
+        EDIT.boostDir = Number(patch.dir);
+        for (const s of boostsSel) s.item.dir = EDIT.boostDir;
+    }
+    if ('power' in patch && Number.isFinite(Number(patch.power))) {
+        EDIT.boostPower = clamp(Math.round(Number(patch.power)), BOOST_POWER.min, BOOST_POWER.max);
+        for (const s of boostsSel) s.item.power = EDIT.boostPower;
+    }
+    const one = selectedItem();
+    if (one) {
+        const { kind, item } = one;
+        if (kind === 'texts') {
+            if ('text' in patch) item.text = String(patch.text).replace(/[\x00-\x1f\x7f]/g, '').slice(0, 80);
+            if ('size' in patch && Number.isFinite(Number(patch.size))) item.size = Number(patch.size);
+        }
+        for (const k of ['x', 'y', 'w', 'h']) {
+            if (k in patch && Number.isFinite(Number(patch[k])) && (isRectKind(kind) || k === 'x' || k === 'y')) item[k] = Number(patch[k]);
+        }
+        fit(kind, item);
+    }
     levelChanged();
     return true;
 }
@@ -1930,6 +2496,47 @@ function rrect(x, y, w, h, r) {
     ctx.roundRect(x, y, w, h, Math.min(r, w / 2, h / 2));
 }
 
+/** A speed boost: an orange see-through box with chevrons sliding the way it pushes. */
+function drawBoost(b, faded) {
+    ctx.save();
+    ctx.globalAlpha = faded ? 0.25 : 1;
+    rrect(b.x, b.y, b.w, b.h, 6);
+    ctx.fillStyle = 'rgba(249, 115, 22, 0.16)';
+    ctx.fill();
+    ctx.strokeStyle = '#f97316';
+    ctx.lineWidth = 2;
+    ctx.setLineDash(faded ? [5, 4] : []);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.clip();
+    const cx = b.x + b.w / 2;
+    const cy = b.y + b.h / 2;
+    const reach = Math.hypot(b.w, b.h) / 2 + 12;
+    const gap = 18;
+    const shift = ((performance.now() / 1000) * (40 + b.power * 0.08)) % gap; // faster chevrons for stronger boosts
+    ctx.translate(cx, cy);
+    ctx.rotate((-b.dir * Math.PI) / 180);
+    ctx.strokeStyle = 'rgba(234, 88, 12, 0.85)';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (let x = -reach + shift; x < reach; x += gap) {
+        ctx.beginPath();
+        ctx.moveTo(x - 5, -7);
+        ctx.lineTo(x + 2, 0);
+        ctx.lineTo(x - 5, 7);
+        ctx.stroke();
+    }
+    ctx.restore();
+    if (EDIT.on && b.w >= 30 && b.h >= 22) { // its power, so you can tell boosts apart while editing
+        ctx.save();
+        ctx.font = '800 10px Lato, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#9a3412';
+        ctx.fillText(String(b.power), b.x + b.w / 2, b.y + b.h - 5);
+        ctx.restore();
+    }
+}
 /** Draw the level (under the runners). */
 export function drawLevel() {
     const L = LEVEL.data;
@@ -1954,17 +2561,44 @@ export function drawLevel() {
         ctx.stroke();
     }
 
+    ctx.textAlign = 'left'; // text on the map (under everything else)
+    for (const tx of L.texts) {
+        ctx.font = `700 ${tx.size}px Lato, sans-serif`;
+        ctx.fillStyle = '#475569';
+        ctx.fillText(tx.text, tx.x, tx.y);
+    }
+
     for (const c of L.cards) {
         ctx.globalAlpha = faded(c) ? 0.25 : 1;
         ctx.setLineDash(faded(c) ? [5, 4] : []);
         rrect(c.x, c.y, c.w, c.h, 4);
         ctx.fillStyle = '#ffffff';
         ctx.fill();
-        ctx.strokeStyle = '#c7cdd1';
-        ctx.lineWidth = 1.5;
+        // No wall jump: red. No grapple: purple. Both: red border, the top strip half red and half purple.
+        const special = c.noWallJump || c.noGrapple;
+        ctx.strokeStyle = c.noWallJump ? '#dc2626' : c.noGrapple ? '#7c3aed' : '#c7cdd1';
+        ctx.lineWidth = special ? 2.5 : 1.5;
         ctx.stroke();
-        ctx.fillStyle = DIM_COLOR[c.dim];
-        ctx.fillRect(c.x + 1, c.y + 1, c.w - 2, Math.min(26, c.h * 0.4));
+        const stripH = Math.min(26, c.h * 0.4);
+        if (c.noWallJump && c.noGrapple) {
+            ctx.fillStyle = '#fca5a5';
+            ctx.fillRect(c.x + 1, c.y + 1, (c.w - 2) / 2, stripH);
+            ctx.fillStyle = '#c4b5fd';
+            ctx.fillRect(c.x + 1 + (c.w - 2) / 2, c.y + 1, (c.w - 2) / 2, stripH);
+        } else {
+            ctx.fillStyle = c.noWallJump ? '#fca5a5' : c.noGrapple ? '#c4b5fd' : DIM_COLOR[c.dim];
+            ctx.fillRect(c.x + 1, c.y + 1, c.w - 2, stripH);
+        }
+        if (special && c.h >= 30) {
+            const label = c.noWallJump && c.noGrapple ? (c.w >= 200 ? 'NO WALL JUMP · NO GRAPPLE' : c.w >= 70 ? 'NO WJ · NO HOOK' : '') : c.noWallJump ? (c.w >= 90 ? 'NO WALL JUMP' : '') : (c.w >= 80 ? 'NO GRAPPLE' : '');
+            if (label) {
+                ctx.font = '800 9px Lato, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillStyle = c.noWallJump ? '#7f1d1d' : '#4c1d95';
+                ctx.fillText(label, c.x + c.w / 2, c.y + 14);
+                ctx.textAlign = 'left';
+            }
+        }
         ctx.fillStyle = '#e2e8f0';
         for (let ly = c.y + Math.min(26, c.h * 0.4) + 10; ly < c.y + c.h - 8; ly += 12) ctx.fillRect(c.x + 8, ly, Math.max(0, (c.w - 16) * (0.5 + 0.4 * Math.abs(Math.sin(ly)))), 4);
     }
@@ -1987,11 +2621,11 @@ export function drawLevel() {
         for (let x = s.x + 6, up = true; x < s.x + s.w - 4; x += 8, up = !up) ctx.lineTo(x, s.y + (up ? 3 : s.h - 3));
         ctx.stroke();
     }
+    for (const b of L.boosts) drawBoost(b, faded(b));
     ctx.globalAlpha = 1;
 
-    if (EDIT.on || PF.game === 'tide') { // coins
+    if (EDIT.on) { // coins (only shown in the editor: no Platformer game uses them at the moment)
         L.pickups.forEach((p, i) => {
-            if (!EDIT.on && PF.collected.has(i)) return;
             ctx.fillStyle = '#facc15';
             ctx.strokeStyle = '#a16207';
             ctx.lineWidth = 1.5;
@@ -2044,47 +2678,62 @@ export function drawLevel() {
     ctx.restore();
 }
 
-/** Editor overlay (after the runners): selection, handles and cursor position. */
+/** Editor overlay (after the runners): selection, handles, the selection box and the cursor position. */
 export function drawEditor() {
     if (!EDIT.on) return;
     ctx.save();
-    const sel = selectedItem();
-    if (sel) {
-        const b = boundsOf(sel.kind, sel.item);
-        ctx.strokeStyle = '#2563eb';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([5, 3]);
-        ctx.strokeRect(b.x - 2, b.y - 2, b.w + 4, b.h + 4);
+    const items = selectedItems();
+    ctx.strokeStyle = '#2563eb';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 3]);
+    for (const s of items) {
+        const bb = boundsOf(s.kind, s.item);
+        ctx.strokeRect(bb.x - 2, bb.y - 2, bb.w + 4, bb.h + 4);
+    }
+    ctx.setLineDash([]);
+    if (items.length === 1 && isRectKind(items[0].kind)) { // the resize handle
+        const bb = boundsOf(items[0].kind, items[0].item);
+        ctx.fillStyle = '#2563eb';
+        ctx.fillRect(bb.x + bb.w - 7, bb.y + bb.h - 7, 9, 9);
+    }
+    if (EDIT.box) { // box select
+        const x = Math.min(EDIT.box.x1, EDIT.box.x2);
+        const y = Math.min(EDIT.box.y1, EDIT.box.y2);
+        const w = Math.abs(EDIT.box.x2 - EDIT.box.x1);
+        const h = Math.abs(EDIT.box.y2 - EDIT.box.y1);
+        ctx.fillStyle = 'rgba(37, 99, 235, 0.12)';
+        ctx.fillRect(x, y, w, h);
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]);
+        ctx.strokeRect(x, y, w, h);
         ctx.setLineDash([]);
-        if (isRectKind(sel.kind)) {
-            ctx.fillStyle = '#2563eb';
-            ctx.fillRect(b.x + b.w - 7, b.y + b.h - 7, 9, 9);
-        }
     }
     ctx.font = '600 10px ui-monospace, Consolas, monospace';
     ctx.textAlign = 'left';
     ctx.fillStyle = '#334155';
     ctx.fillText(`${Math.round(EDIT.hover.x)}, ${Math.round(EDIT.hover.y)}`, Math.min(EDIT.hover.x + 12, LEVEL_W - 70), Math.max(EDIT.hover.y - 8, 12));
     ctx.restore();
-    hudPill(`LEVEL EDITOR: ${LEVEL.data.name}   (the game is paused)`, 0, '#bfdbfe');
+    hudPill(`LEVEL EDITOR: ${LEVEL.data.name}${items.length > 1 ? `   ${items.length} selected` : ''}   (the game is paused)`, 0, '#bfdbfe');
 }
 
 // ===========================================================================
-// PLATFORMER LAB (IN PROGRESS)
+// PLATFORMER
 // ===========================================================================
-// Only runs in the "platformer" server type with developer mode on. Everything here is an experiment
-// you can switch on and off from the dev panel. No tagging or bot runs in this mode.
-//   Movement : aimed grapple, dash charges, 8-way dash, springs, slide (see the sections above)
-//   Games    : Race (run through the level's flags, race your ghost), Overdue (rising floor + coins)
-//   Puzzle   : dimension flip (Tab)
-// The level and its editor are in the section above.
+// Runs in the "platformer" server type. No tagging or bots here. You race to the flags and your best time on each
+// map is saved. The level and its editor are in the section above. Aimed grapple and dash charges
+// (PF.grappleMode, PF.dashMode) are still in the code but are not offered in the menus.
 
-/** Start the selected lab game over. The app calls this on respawn and when the game changes. */
+export const COUNTDOWN = 2; // seconds of 2, 1, GO before a level starts
+
+/** True while the 2, 1, GO countdown is running: you cannot move yet and the clock has not started. */
+export const inCountdown = () => isPlatformer() && PF.countdown > 0 && !EDIT.on;
+
+/** Does this map have anything that only exists in one dimension? Tab only does something if it does. */
+export const levelHasDims = (L = LEVEL.data) => [...L.cards, ...L.ledges, ...L.springs, ...L.boosts].some((o) => o.dim !== 'both');
+
+/** Start the level over. The app calls this on respawn and whenever a map starts. */
 export function labRestart() {
-    PF.tide.t = 0;
-    PF.tide.level = 0;
-    PF.tide.collected = 0;
-    PF.collected.clear();
+    PF.countdown = isPlatformer() ? COUNTDOWN : 0;
     const R = PF.race;
     Object.assign(R, { next: 0, t: 0, done: false, doneAt: 0, rec: [], recT: 0 });
     local.dashCharges = 1;
@@ -2096,61 +2745,11 @@ export function labRestart() {
 
 /** Tab key: flip to the other dimension. */
 export function flipDimension() {
-    if (!labOn() || !PF.dimensions) return;
+    if (!pfOn() || !PF.dimensions || !levelHasDims() || inCountdown()) return; // nothing to flip on a map without dimensions
     PF.dim ^= 1;
     scanWorld();
     spawnParticles(local.x + local.w / 2, local.y + local.h / 2, PF.dim ? '#a78bfa' : '#60a5fa', 24);
     popText(local.x + local.w / 2, local.y - 14, `Dimension ${PF.dim ? 'B' : 'A'}`, PF.dim ? '#c4b5fd' : '#93c5fd', 1);
-}
-
-// --- Overdue: the page's due date rises like a tide --------------------------
-const TIDE_GRACE = 4;
-
-function tideUpdate(dt) {
-    const td = PF.tide;
-    td.t += dt;
-    if (td.t > TIDE_GRACE) td.level += Math.min(70, 16 + (td.t - TIDE_GRACE) * 0.5) * dt;
-
-    const cx = local.x + local.w / 2;
-    const cy = local.y + local.h / 2;
-    for (const p of PF.pickups) {
-        if (PF.collected.has(p.id) || Math.hypot(p.x - cx, p.y - cy) > 16) continue;
-        PF.collected.add(p.id);
-        td.collected++;
-        td.level = Math.max(0, td.level - 90);
-        popText(p.x, p.y - 8, 'ON TIME +1', '#facc15', 0.8);
-        spawnParticles(p.x, p.y, '#facc15', 10);
-    }
-    if (PF.pickups.length && PF.pickups.every((p) => PF.collected.has(p.id))) PF.collected.clear(); // refill the page
-
-    if (td.level > 0 && local.y + local.h > view.h - td.level + 6) {
-        td.best = Math.max(td.best, td.t);
-        bridge.toast(`Overdue! You lasted ${td.t.toFixed(1)}s (best ${td.best.toFixed(1)}s)`);
-        bridge.respawn(); // respawn calls labRestart
-    }
-}
-
-function tideDraw() {
-    const td = PF.tide;
-    if (td.level > 0) {
-        const top = view.h - td.level;
-        ctx.save();
-        const wave = performance.now() * 0.004;
-        ctx.fillStyle = 'rgba(220, 38, 38, 0.34)';
-        ctx.beginPath();
-        ctx.moveTo(0, view.h);
-        for (let x = 0; x <= view.w; x += 20) ctx.lineTo(x, top + Math.sin(x * 0.03 + wave) * 4);
-        ctx.lineTo(view.w, view.h);
-        ctx.closePath();
-        ctx.fill();
-        ctx.fillStyle = 'rgba(254, 202, 202, 0.9)';
-        ctx.font = '900 12px Lato, sans-serif';
-        ctx.textAlign = 'center';
-        for (let x = 120; x < view.w; x += 320) ctx.fillText('OVERDUE', x, Math.min(view.h - 6, top + 22));
-        ctx.restore();
-    }
-    const risingIn = Math.ceil(TIDE_GRACE - td.t);
-    hudPill(risingIn > 0 ? `Overdue rising in ${risingIn}... find high ground` : `OVERDUE   ${td.t.toFixed(1)}s   best ${td.best.toFixed(1)}s   on time ${td.collected}`, 0, '#fecaca');
 }
 
 // --- Race: run through the level's flags in order, race your ghost ------------
@@ -2174,11 +2773,16 @@ function raceUpdate(dt) {
     if (++R.next < R.flags.length) return;
     R.done = true;
     R.doneAt = 3;
-    if (R.best === null || R.t < R.best) {
+    const isBest = R.best === null || R.t < R.best;
+    if (isBest) { // keep it: the best time and the ghost of this run are saved in the browser
         R.best = R.t;
-        R.ghost = R.rec.slice();
-        bridge.toast(`Finish! ${R.t.toFixed(2)}s, a new best`);
-    } else bridge.toast(`Finish! ${R.t.toFixed(2)}s (best ${R.best.toFixed(2)}s)`);
+        R.ghost = R.rec.slice(0, 3000);
+        RECORDS[mapKey()] = { best: R.best, ghost: R.ghost, at: Date.now() };
+        saveRecords();
+        bridge.mapChanged();
+    }
+    const c = MAPS.index >= 0 ? campaign() : null;
+    bridge.toast(`Finish! ${fmtTime(R.t)}${isBest ? ', a new best!' : ` (best ${fmtTime(R.best)})`}${c ? `   Campaign ${c.done}/${c.total}${c.sum !== null ? `: ${fmtTime(c.sum)} total` : ''}` : ''}`);
 }
 
 function raceDraw() {
@@ -2193,28 +2797,54 @@ function raceDraw() {
         Object.assign(R.ghostRunner, { x: a[0] + (b[0] - a[0]) * f, y: a[1] + (b[1] - a[1]) * f, facing: a[2] });
         drawRunner(R.ghostRunner, 'Best');
     }
-    if (!R.flags.length) { hudPill('RACE: this level has no flag. Add one in the level editor.', 0, '#fde68a'); return; }
-    hudPill(R.done ? `Finished in ${R.t.toFixed(2)}s   best ${R.best.toFixed(2)}s` : `RACE  ${R.next} / ${R.flags.length}   ${R.t.toFixed(1)}s${R.best !== null ? `   best ${R.best.toFixed(1)}s` : ''}`, 0, '#bbf7d0');
+    if (!R.flags.length) { hudPill('This level has no flag. Add one in the level editor.', 0, '#fde68a'); return; }
+    const flags = R.flags.length > 1 ? `   ${R.next}/${R.flags.length} flags` : '';
+    hudPill(R.done ? `Finished in ${fmtTime(R.t)}   best ${fmtTime(R.best)}` : `${fmtTime(R.t)}${flags}${R.best !== null ? `   best ${fmtTime(R.best)}` : ''}`, 0, '#bbf7d0');
 }
 
 /** Runs every frame in Platformer mode, before drawing. */
 export function platformerUpdate(dt) {
-    if (!labOn() || EDIT.on) return;
+    if (!pfOn() || EDIT.on) return;
+    if (PF.countdown > 0) { // 2, 1, GO: no clock and no moving until it ends
+        PF.countdown -= dt;
+        if (PF.countdown <= 0) {
+            PF.countdown = 0;
+            popText(local.x + local.w / 2, local.y - 14, 'GO!', '#4ade80', 0.9);
+            spawnParticles(local.x + local.w / 2, local.y + local.h, '#4ade80', 14);
+        }
+        return;
+    }
     if (PF.grappleMode === 'aimed') updateAim();
-    if (PF.game === 'tide') tideUpdate(dt);
-    else if (PF.game === 'race') raceUpdate(dt);
+    if (PF.game === 'race') raceUpdate(dt);
+}
+
+/** The big 2, 1 in the middle of the level. */
+function drawCountdown() {
+    if (PF.countdown <= 0) return;
+    const n = Math.ceil(PF.countdown);
+    const into = 1 - (PF.countdown - (n - 1)); // 0 at the start of each number, 1 at the end (it grows and fades)
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = `900 ${150 + into * 24}px Lato, sans-serif`;
+    ctx.fillStyle = `rgba(15, 23, 42, ${0.62 - into * 0.32})`;
+    ctx.fillText(String(n), view.w / 2, view.h / 2 + 30);
+    ctx.font = '800 22px Lato, sans-serif';
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
+    ctx.fillText(mapLabel(), view.w / 2, view.h / 2 + 70);
+    ctx.restore();
 }
 
 /** Runs every frame in Platformer mode, after the runners are drawn. */
 export function platformerDraw() {
-    if (!labOn()) return;
-    if (PF.dimensions && PF.dim) {
+    if (!pfOn()) return;
+    PF.race.flags = LEVEL.data.flags;
+    if (PF.dimensions && PF.dim && levelHasDims()) {
         ctx.fillStyle = 'rgba(99, 102, 241, 0.08)';
         ctx.fillRect(0, 0, view.w, view.h);
     }
     if (EDIT.on) { drawEditor(); return; }
-    if (PF.game === 'tide') tideDraw();
-    else if (PF.game === 'race') raceDraw();
+    if (PF.game === 'race') raceDraw();
+    drawCountdown();
 
     // Aimed grapple: dots on every hookable point, a ring on the one E will fire at
     if (PF.grappleMode === 'aimed' && !local.grapple.active) {
@@ -2254,7 +2884,7 @@ export function platformerDraw() {
     }
 
     const tips = [];
-    if (PF.dimensions) tips.push(`Dimension ${PF.dim ? 'B' : 'A'} (Tab flips)`);
+    if (PF.dimensions && levelHasDims()) tips.push(`Dimension ${PF.dim ? 'B' : 'A'} (Tab flips)`);
     if (PF.grappleMode === 'aimed') tips.push('E hooks the ringed point, R picks the next');
     if (tips.length) hudPill(tips.join('   ·   '), PF.game === 'sandbox' ? 0 : 1, '#c4b5fd');
 }

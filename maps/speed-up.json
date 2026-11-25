@@ -1,0 +1,25 @@
+{
+  "format": "super-class-bros-level",
+  "version": 1,
+  "name": "Speed Up",
+  "size": [1440, 810],
+  "spawn": {"x":490,"y":480},
+  "cards": [
+    {"x":480,"y":480,"w":360,"h":90,"dim":"both"},
+    {"x":620,"y":110,"w":280,"h":16,"dim":"both","noWallJump":true,"noGrapple":true}
+  ],
+  "ledges": [
+    {"x":690,"y":400,"w":120,"h":12,"dim":"both"},
+    {"x":690,"y":370,"w":120,"h":12,"dim":"both"},
+    {"x":690,"y":340,"w":120,"h":12,"dim":"both"},
+    {"x":690,"y":310,"w":120,"h":12,"dim":"both"},
+    {"x":690,"y":280,"w":120,"h":12,"dim":"both"}
+  ],
+  "springs": [],
+  "boosts": [],
+  "flags": [
+    {"x":780,"y":280}
+  ],
+  "pickups": [],
+  "texts": []
+}

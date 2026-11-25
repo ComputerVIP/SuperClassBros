@@ -1,0 +1,25 @@
+{
+  "format": "super-class-bros-level",
+  "version": 1,
+  "name": "Speed",
+  "size": [1440, 810],
+  "spawn": {"x":650,"y":540},
+  "cards": [
+    {"x":570,"y":540,"w":160,"h":120,"dim":"both"},
+    {"x":190,"y":450,"w":160,"h":120,"dim":"both"},
+    {"x":890,"y":450,"w":160,"h":120,"dim":"both"}
+  ],
+  "ledges": [],
+  "springs": [],
+  "boosts": [],
+  "flags": [
+    {"x":270,"y":450},
+    {"x":970,"y":450},
+    {"x":650,"y":540}
+  ],
+  "pickups": [],
+  "texts": [
+    {"x":210,"y":400,"text":"Flag 1 before 2","size":20},
+    {"x":910,"y":400,"text":"Flag 2 before 3","size":20}
+  ]
+}

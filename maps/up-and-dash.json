@@ -1,0 +1,23 @@
+{
+  "format": "super-class-bros-level",
+  "version": 1,
+  "name": "Up and Dash",
+  "size": [1440, 810],
+  "spawn": {"x":410,"y":500},
+  "cards": [
+    {"x":370,"y":500,"w":550,"h":170,"dim":"both"},
+    {"x":610,"y":290,"w":50,"h":240,"dim":"both","noWallJump":true,"noGrapple":true},
+    {"x":320,"y":160,"w":50,"h":510,"dim":"both","noWallJump":true,"noGrapple":true},
+    {"x":720,"y":200,"w":40,"h":230,"dim":"both","noWallJump":true,"noGrapple":true},
+    {"x":320,"y":150,"w":440,"h":80,"dim":"both","noWallJump":true,"noGrapple":true}
+  ],
+  "ledges": [],
+  "springs": [],
+  "flags": [
+    {"x":910,"y":500}
+  ],
+  "pickups": [],
+  "texts": [
+    {"x":790,"y":260,"text":"You can dash up and down","size":20}
+  ]
+}

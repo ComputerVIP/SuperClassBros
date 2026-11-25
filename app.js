@@ -1,15 +1,17 @@
 // APP: the page itself. Menus, chat, keyboard, the fake Canvas dashboard, and the start/stop/room lifecycle.
 import {
     G, local, bots, view, keys, $, roomKey, palette, playerName, hashString, cleanMode, cleanRoom,
-    isTag, isPlatformer, activeBots, botCountFor, setBotLevel, MAX_BOTS, DEV, MODES, PALETTES, T, PF, JUMP_BUFFER_MAX, bridge,
+    isTag, isPlatformer, isOverdue, overdueWaiting, activeBots, botCountFor, setBotLevel, MAX_BOTS, DEV, MODES, PALETTES, JUMP_BUFFER_MAX, bridge,
     scanWorld, stepRunner, stepBots, runTag, reconcileIt, becomeIt, startAsIt, assignRandomIt, freezeLocal, thawLocal, resetRoundState,
     drawEffects, spawnParticles, drawRunner, drawGrapple, drawVariantHud,
-    handleJump, fastFall, toggleGrapple, grappleAction, triggerDash, aimPointer, aimCycle, flipDimension, labRestart,
-    resizeView, beginFrame, clearScreen, applyDevFlags, teleportLocal, resetTuning, changedTuning,
+    runOverdue, overdueDotTaken,
+    handleJump, fastFall, toggleGrapple, grappleAction, triggerDash, flipDimension, labRestart, inCountdown,
+    resizeView, beginFrame, clearScreen, applyDevFlags, teleportLocal,
     drawDebug, platformerUpdate, platformerDraw,
     LEVEL, EDIT, toDesign, drawLevel, levelSpawn, levelToJson, applyLevel, resetLevel, clearLevel, setLevelName,
     setEditing, setEditorTool, editorPointer, editorDelete, updateSelected, selectedItem,
-    MAPS, setBuiltinMaps, selectMap, nextMap, useSavedMap, resetGhost,
+    MAPS, setBuiltinMaps, selectMap, nextMap, useSavedMap, hasSavedMap, resetRecord, campaign, fmtTime, bestTimeOf,
+    selectedItems, editorCopy, editorCut, editorPaste, editorDuplicate, editorSelectAll, editorSelectNone, editorNudge,
 } from './engine.js';
 import { hooks, joinRoom, leaveRoom, send, publishPresence, getLobbies, applyPayload, pushState, stepRemotes } from './online.js';
 
@@ -26,6 +28,7 @@ const el = {
     chatUnread: $('chat-unread'), moreUnread: $('more-unread'),
     customizer: $('customizer-popover'), nameInput: $('player-name-input'), swatches: $('color-swatch-grid'),
     lobby: $('lobby-popover'), lobbyList: $('lobby-list'),
+    levels: $('levels-popover'), levelList: $('levels-list'), levelTotal: $('levels-total'),
     backdrop: $('level-backdrop'), toast: $('canvas-toast'), trigger: $('secret-ucas-trigger'), pill: $('discovered-tag-pill'),
 };
 
@@ -46,6 +49,7 @@ const isMenuHidden = () => el.hud.classList.contains('menu-collapsed');
 function closePopovers() {
     el.customizer.classList.add('hidden');
     el.lobby.classList.add('hidden');
+    el.levels.classList.add('hidden');
 }
 
 function togglePanel(open = el.panel.classList.contains('hidden')) {
@@ -76,11 +80,11 @@ function setBackdrop() {
     el.backdrop.classList.toggle('hidden', !(G.active && isPlatformer()));
 }
 
-/** Open one popover and close the other (and the panel, which they would overlap). */
+/** Open one popover and close the others (and the panel, which they would overlap). */
 function togglePopover(which) {
-    const target = which === 'lobby' ? el.lobby : el.customizer;
-    const other = which === 'lobby' ? el.customizer : el.lobby;
-    other.classList.add('hidden');
+    const all = { lobby: el.lobby, customizer: el.customizer, levels: el.levels };
+    const target = all[which];
+    for (const [name, box] of Object.entries(all)) if (name !== which) box.classList.add('hidden');
     target.classList.toggle('hidden');
     const open = !target.classList.contains('hidden');
     if (open) el.panel.classList.add('hidden');
@@ -218,36 +222,6 @@ function renderLobbies(lobbies, onJoin) {
 const DEV_TOGGLES = [
     ['hitboxes', 'Hitboxes'], ['stats', 'Stats'], ['fly', 'Fly'], ['infJumps', 'Infinite jumps'], ['teleport', 'Click to teleport'],
 ];
-const DEV_SLIDERS = [ // label, object, key, min, max, step
-    ['Time scale', G.dev, 'timeScale', 0.1, 1, 0.05],
-    ['Gravity', T, 'GRAVITY', 300, 2400, 10],
-    ['Run speed', T, 'MAX_VX', 100, 600, 5],
-    ['Jump', T, 'JUMP_VEL', -900, -250, 5],
-    ['Double jump', T, 'DOUBLE_JUMP_VEL', -900, -250, 5],
-    ['Dash speed', T, 'DASH_SPEED', 300, 1200, 10],
-    ['Dash cd (tag)', T, 'DASH_COOLDOWN', 0, 2, 0.05],
-    ['Dash cd (platf.)', T, 'DASH_COOLDOWN_PF', 0, 2, 0.05],
-    ['Stack speed x', T, 'SLIDE_STACK_MUL', 1, 1.6, 0.01],
-    ['Stack boost +', T, 'SLIDE_STACK_ADD', 0, 300, 5],
-    ['Stack cap step', T, 'SLIDE_CAP_STEP', 0, 1, 0.05],
-    ['Stack cap max', T, 'SLIDE_CAP_MAX', 1.5, 6, 0.1],
-    ['Grapple range', T, 'MAX_GRAPPLE_DIST', 100, 1200, 10],
-];
-
-function buildDevSliders() {
-    const box = $('dev-sliders');
-    box.innerHTML = '';
-    for (const [label, obj, key, min, max, step] of DEV_SLIDERS) {
-        const row = document.createElement('label');
-        row.className = 'flex items-center gap-1.5 text-[10px] text-slate-300';
-        row.innerHTML = `<span class="w-[74px] shrink-0">${label}</span><input type="range" min="${min}" max="${max}" step="${step}" value="${obj[key]}" class="min-w-0 flex-1 accent-amber-400"><span class="w-9 text-right font-mono text-amber-200">${obj[key]}</span>`;
-        const input = row.querySelector('input');
-        const out = row.lastElementChild;
-        input.addEventListener('input', () => { obj[key] = Number(input.value); out.textContent = obj[key]; });
-        box.appendChild(row);
-    }
-}
-
 /** Dev panel: how many practice bots there are (the variants default to 2, Tag to 1). */
 function buildBotCountUi() {
     const box = $('dev-bots');
@@ -279,95 +253,10 @@ function buildBotCountUi() {
 }
 let refreshBotCountUi = () => {};
 
-const LAB_SELECTS = [ // label, PF key, options
-    ['Grapple', 'grappleMode', [['auto', 'Auto: nearest card'], ['aimed', 'Aimed: E fires, R cycles']]],
-    ['Dash', 'dashMode', [['charges', '1 charge, refills on touch'], ['cooldown', 'Cooldown']]],
-    ['Game', 'game', [['sandbox', 'Sandbox'], ['tide', 'Overdue: rising floor'], ['race', 'Flag race + ghost']]],
-];
-const LAB_TOGGLES = [['dash8', '8-way dash'], ['springs', 'Spring pads'], ['slide', 'Slide (hold S)'], ['slideStack', 'Slide stacking'], ['dimensions', 'Dimensions (Tab)'], ['nextMap', 'Next map after finishing']];
-
-/** Platformer lab switches. They only take effect in the Platformer server type. */
-let labMapSelect = null;
-
-/** Fill the map picker from the built-in maps, and show which one you are on. */
-function refreshMapSelect() {
-    if (!labMapSelect) return;
-    labMapSelect.innerHTML = '';
-    MAPS.list.forEach((m, i) => {
-        const o = document.createElement('option');
-        o.value = String(i);
-        o.textContent = `${i + 1}. ${m.name}`;
-        labMapSelect.appendChild(o);
-    });
-    const mine = document.createElement('option');
-    mine.value = 'custom';
-    mine.textContent = `Your map: ${LEVEL.data.name}`;
-    labMapSelect.appendChild(mine);
-    labMapSelect.value = MAPS.index >= 0 ? String(MAPS.index) : 'custom';
-}
-
-function buildLabUi() {
-    const box = $('dev-lab');
-    box.innerHTML = '<div class="text-[10px] font-bold text-amber-300">Platformer lab <span class="font-normal text-slate-400">(Platformer server only)</span></div>';
-    const apply = () => { scanWorld(); labRestart(); };
-
-    const mapRow = document.createElement('label');
-    mapRow.className = 'flex items-center gap-1.5 text-[10px] text-slate-300';
-    mapRow.title = 'Pick a map. The [ and ] keys go to the previous and next map.';
-    mapRow.innerHTML = '<span class="w-12 shrink-0">Map</span><select class="min-w-0 flex-1 bg-slate-900 text-amber-100 rounded border border-slate-600 px-1 py-0.5 cursor-pointer"></select>';
-    labMapSelect = mapRow.querySelector('select');
-    labMapSelect.addEventListener('change', (e) => {
-        if (e.target.value === 'custom') { if (!useSavedMap()) showToast('You have not made a map of your own yet. Open the level editor.'); }
-        else selectMap(Number(e.target.value));
-        refreshMapSelect();
-        e.target.blur();
-    });
-    box.appendChild(mapRow);
-    refreshMapSelect();
-    for (const [label, key, options] of LAB_SELECTS) {
-        const row = document.createElement('label');
-        row.className = 'flex items-center gap-1.5 text-[10px] text-slate-300';
-        row.innerHTML = `<span class="w-12 shrink-0">${label}</span><select class="min-w-0 flex-1 bg-slate-900 text-amber-100 rounded border border-slate-600 px-1 py-0.5 cursor-pointer">${options.map(([v, t]) => `<option value="${v}"${PF[key] === v ? ' selected' : ''}>${t}</option>`).join('')}</select>`;
-        row.querySelector('select').addEventListener('change', (e) => { PF[key] = e.target.value; apply(); e.target.blur(); });
-        box.appendChild(row);
-    }
-    const toggles = document.createElement('div');
-    toggles.className = 'flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-200';
-    for (const [key, label] of LAB_TOGGLES) {
-        const row = document.createElement('label');
-        row.className = 'flex items-center gap-1 cursor-pointer';
-        row.innerHTML = `<input type="checkbox" class="accent-amber-400"${PF[key] ? ' checked' : ''}> ${label}`;
-        row.firstElementChild.addEventListener('change', (e) => { PF[key] = e.target.checked; apply(); e.target.blur(); });
-        toggles.appendChild(row);
-    }
-    box.appendChild(toggles);
-    const restart = document.createElement('button');
-    restart.className = 'px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-[10px] text-slate-200 cursor-pointer';
-    restart.textContent = 'Restart lab game';
-    restart.addEventListener('click', () => respawn());
-    box.appendChild(restart);
-    const ghost = document.createElement('button');
-    ghost.className = 'ml-1 px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-[10px] text-slate-200 cursor-pointer';
-    ghost.textContent = 'Reset ghost (G)';
-    ghost.addEventListener('click', () => resetGhost(true));
-    box.appendChild(ghost);
-}
-
 function setupDevUi() {
     if (!DEV) return;
-    // Dev-only server types become joinable.
-    for (const sel of [el.mode, $('new-room-mode')]) {
-        for (const opt of sel.options) {
-            if (!MODES[opt.value]?.dev) continue;
-            opt.hidden = false;
-            opt.disabled = false;
-            opt.textContent = MODES[opt.value].label;
-        }
-    }
     $('dev-panel').classList.remove('hidden');
     buildBotCountUi();
-    buildLabUi();
-    on('dev-editor-btn', 'click', openEditor);
     const toggles = $('dev-toggles');
     for (const [key, label] of DEV_TOGGLES) {
         const row = document.createElement('label');
@@ -376,18 +265,84 @@ function setupDevUi() {
         row.firstElementChild.addEventListener('change', (e) => { G.dev[key] = e.target.checked; applyDevFlags(); });
         toggles.appendChild(row);
     }
-    buildDevSliders();
-    $('dev-reset-btn').addEventListener('click', () => { resetTuning(); G.dev.timeScale = 1; buildDevSliders(); showToast('Tuning reset'); });
-    $('dev-copy-btn').addEventListener('click', async () => {
-        const text = JSON.stringify(changedTuning(), null, 2);
-        try { await navigator.clipboard.writeText(text); showToast('Changed values copied. Paste them into DEFAULTS in engine.js'); }
-        catch (e) { showToast(`Could not copy: ${text}`); }
-    });
+    // Slow motion: the game runs slower, handy for checking a jump or a slide.
+    const slow = document.createElement('label');
+    slow.className = 'flex items-center gap-1.5 text-[10px] text-slate-300';
+    slow.innerHTML = '<span class="w-[74px] shrink-0">Slow motion</span><input type="range" min="0.1" max="1" step="0.05" value="1" class="min-w-0 flex-1 accent-amber-400"><span class="w-9 text-right font-mono text-amber-200">1</span>';
+    const slider = slow.querySelector('input');
+    const shown = slow.lastElementChild;
+    slider.addEventListener('input', () => { G.dev.timeScale = Number(slider.value); shown.textContent = G.dev.timeScale; });
+    $('dev-sliders').appendChild(slow);
     // Click anywhere on the page to teleport there (when the switch is on).
     window.addEventListener('click', (e) => {
         if (!G.active || !G.dev.teleport || e.target.closest(UI_SELECTOR)) return;
         teleportLocal(e.clientX, e.clientY);
     });
+}
+
+// ===========================================================================
+// LEVELS (Platformer): the level list with your best times, and the campaign total
+// ===========================================================================
+function renderLevels() {
+    if (el.levels.classList.contains('hidden')) return;
+    const c = campaign();
+    el.levelList.innerHTML = '';
+    const addRow = (title, note, noteGood, current, label, onPlay, onReset) => {
+        const row = document.createElement('div');
+        row.className = `flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl border transition ${current ? 'bg-emerald-950/60 border-emerald-500/60' : 'bg-slate-800/80 border-slate-700 hover:border-slate-500'}`;
+        const info = document.createElement('div');
+        info.className = 'min-w-0 flex-1';
+        const t1 = document.createElement('div');
+        t1.className = 'font-bold text-xs text-slate-100 truncate';
+        t1.textContent = title;
+        const t2 = document.createElement('div');
+        t2.className = `text-[10px] ${noteGood ? 'text-emerald-300' : 'text-slate-500'}`;
+        t2.textContent = note;
+        info.append(t1, t2);
+        row.appendChild(info);
+        if (onReset) {
+            const reset = document.createElement('button');
+            reset.type = 'button';
+            reset.title = 'Forget the best time and ghost for this level';
+            reset.className = 'px-1.5 py-1 rounded-lg bg-slate-700 hover:bg-rose-600 text-[10px] text-slate-200 cursor-pointer';
+            reset.textContent = '↺';
+            reset.addEventListener('click', () => onReset());
+            row.appendChild(reset);
+        }
+        const play = document.createElement('button');
+        play.type = 'button';
+        play.textContent = current ? 'Playing' : label;
+        play.className = current
+            ? 'px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 font-bold text-[10px] border border-emerald-500/40 cursor-default'
+            : 'px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-[10px] transition cursor-pointer';
+        if (!current) play.addEventListener('click', () => { onPlay(); closePopovers(); });
+        row.appendChild(play);
+        el.levelList.appendChild(row);
+    };
+    c.rows.forEach((row, i) => addRow(
+        `${i + 1}. ${row.name}`, row.best !== null ? `Best ${fmtTime(row.best)}` : 'No time yet', row.best !== null, MAPS.index === i, 'Play',
+        () => selectMap(i),
+        row.best !== null ? () => { if (sure(`Forget your best time for ${row.name}?`)) { resetRecord(MAPS.list[i].level); renderLevels(); } } : null,
+    ));
+    if (MAPS.index === -1 || hasSavedMap()) {
+        const mineBest = MAPS.index === -1 ? bestTimeOf(LEVEL.data) : null;
+        addRow(`Your map: ${MAPS.index === -1 ? LEVEL.data.name : 'saved'}`, mineBest !== null ? `Best ${fmtTime(mineBest)}` : 'Made in the level editor or loaded from a file', mineBest !== null, MAPS.index === -1, 'Play', () => useSavedMap(), null);
+    }
+    el.levelTotal.textContent = c.sum !== null ? `Campaign total: ${fmtTime(c.sum)}` : `Campaign: ${c.done} of ${c.total} levels finished`;
+}
+
+let resetArmedAt = 0;
+/** G on a level: asks, then (on the second press) forgets this level's best time and ghost. */
+function confirmResetRecord() {
+    const now = performance.now();
+    if (now - resetArmedAt < 3000) {
+        resetArmedAt = 0;
+        resetRecord();
+        showToast('Best time and ghost reset for this level');
+    } else {
+        resetArmedAt = now;
+        showToast("Press G again to reset this level's best time and ghost");
+    }
 }
 
 // ===========================================================================
@@ -464,32 +419,31 @@ window.addEventListener('keydown', (e) => {
 
     if (code === 'Backquote') { e.preventDefault(); toggleGame(); return; }
     if (!G.active) return;
-    if (BLOCKED_DEFAULTS.includes(code) || (code === 'Tab' && isPlatformer() && PF.dimensions)) e.preventDefault();
+    if (BLOCKED_DEFAULTS.includes(code) || (code === 'Tab' && isPlatformer())) e.preventDefault();
     if (code === 'KeyH' && fresh) setMenuHidden(!isMenuHidden());
     if (EDIT.on) { // the level editor owns the keyboard
-        if (code === 'Delete' || code === 'Backspace') { e.preventDefault(); editorDelete(); refreshEditorUi(); }
-        else if (code === 'Escape') closeEditor(true);
+        editorKey(e);
         return;
     }
 
-    if (fresh && code in lastTap) {
+    if (fresh && isPlatformer()) { // change level, reset this level's best time (press G twice)
+        if (code === 'BracketRight') showToast(`Level: ${nextMap(1)}`);
+        if (code === 'BracketLeft') showToast(`Level: ${nextMap(-1)}`);
+        if (code === 'KeyG') confirmResetRecord();
+    }
+    const canAct = !inCountdown(); // nothing moves during the 2, 1, GO countdown
+    if (fresh && canAct && code in lastTap) {
         const now = performance.now();
         if (now - lastTap[code] < 230) triggerDash(local, code === 'KeyA' || code === 'ArrowLeft' ? -1 : 1);
         lastTap[code] = now;
     }
-    if (fresh && !local.frozen) {
+    if (fresh && canAct && !local.frozen) {
         if (JUMP.includes(code)) { local.jumpBufferTimer = JUMP_BUFFER_MAX; handleJump(local); }
         if (DOWN.includes(code)) fastFall(local);
         if (GRAPPLE.includes(code)) grappleAction(local);
         if (GRAPPLE_UP.includes(code)) toggleGrapple(local, true);
         if (DASH.includes(code)) triggerDash(local, local.facing, heldDirection());
-        if (code === 'KeyR' && DEV && isPlatformer()) aimCycle(); // lab: next grapple target
-        if (code === 'Tab') flipDimension();                       // lab: other dimension
-        if (DEV && isPlatformer()) { // lab: change map, forget the ghost
-            if (code === 'BracketRight') showToast(`Map: ${nextMap(1)}`);
-            if (code === 'BracketLeft') showToast(`Map: ${nextMap(-1)}`);
-            if (code === 'KeyG') resetGhost(true);
-        }
+        if (code === 'Tab') flipDimension(); // swap dimensions (only does something on maps that have them)
     }
     keys[code] = true;
 });
@@ -500,15 +454,7 @@ window.addEventListener('keyup', (e) => {
     if (JUMP.includes(e.code) && local.vy < -190 && !local.grapple.active) local.vy *= 0.56;
 });
 
-window.addEventListener('mousemove', (e) => {
-    if (G.active && DEV && isPlatformer() && PF.grappleMode === 'aimed') aimPointer(e.clientX, e.clientY);
-});
-window.addEventListener('click', (e) => {
-    if (!G.active || !DEV || !isPlatformer() || PF.grappleMode !== 'aimed' || G.dev.teleport || e.target.closest(UI_SELECTOR)) return;
-    aimPointer(e.clientX, e.clientY);
-    grappleAction(local);
-});
-
+const IDLE = { left: false, right: false, up: false, down: false };
 const playerInput = () => ({
     left: !!(keys.KeyA || keys.ArrowLeft),
     right: !!(keys.KeyD || keys.ArrowRight),
@@ -705,6 +651,9 @@ function handleMessage(msg) {
                 else if (applyLevel(msg.level)) { showToast(`${msg.from || 'Someone'} shared the map "${LEVEL.data.name}"`); respawn(); }
             }
             break;
+        case 'od-dot': // Overdue: someone grabbed a dot (the host pushes the floor down)
+            if (mine) overdueDotTaken(Number(msg.id));
+            break;
         case 'start-it':
             if (mine && msg.targetId === G.playerId) startAsIt();
             break;
@@ -735,11 +684,11 @@ function frame(now) {
 
     const paused = EDIT.on; // the level editor freezes the game
     if (!paused) {
-        stepRunner(local, dt, playerInput());
+        stepRunner(local, dt, inCountdown() ? IDLE : playerInput());
         stepBots(dt);
     }
     stepRemotes(raw);
-    if (!paused) runTag(dt);
+    if (!paused) { runTag(dt); runOverdue(dt); }
     if (isPlatformer()) platformerUpdate(dt);
     updateHud();
 
@@ -769,11 +718,19 @@ const ED = {
     layer: $('editor-layer'), panel: $('editor-panel'), readout: $('editor-readout'), name: $('editor-name'),
     snap: $('editor-snap'), dim: $('editor-dim'), selLabel: $('editor-sel-label'), file: $('editor-file'),
     x: $('ed-x'), y: $('ed-y'), w: $('ed-w'), h: $('ed-h'),
+    textRow: $('ed-text-row'), text: $('ed-text'), size: $('ed-size'), nowjRow: $('ed-nowj-row'), nowj: $('ed-nowj'), nogr: $('ed-nogr'),
+    boostRow: $('ed-boost-row'), boostDir: $('ed-boost-dir'), boostPower: $('ed-boost-power'),
 };
+let placedText = false; // a text was just placed: put the cursor in its box when the click ends
+/** Nothing selected: the boost boxes set what the next boost you place gets. */
+function setBoostDefaults() {
+    EDIT.boostDir = Number(ED.boostDir.value) || 0;
+    EDIT.boostPower = Math.max(100, Math.min(2000, Math.round(Number(ED.boostPower.value) || 700)));
+}
 const sure = (message) => typeof window.confirm !== 'function' || window.confirm(message);
 
 function openEditor() {
-    if (!DEV || !G.active || !isPlatformer()) { showToast('Start the game in the Platformer server first (menu, Room box).'); return; }
+    if (!G.active || !isPlatformer()) { showToast('Start the game in the Platformer server first (menu, Room box).'); return; }
     togglePanel(false);
     closePopovers();
     setEditing(true);
@@ -800,14 +757,53 @@ function refreshEditorUi() {
     });
     ED.snap.value = String(EDIT.snap);
     ED.name.value = LEVEL.data.name;
-    const sel = selectedItem();
-    ED.selLabel.textContent = sel ? (sel.kind === 'spawn' ? 'Start point' : `${sel.kind.replace(/s$/, '')} #${sel.index + 1}`) : 'Nothing selected (pick a tool, then click or drag)';
+    const sel = selectedItem(); // one selected thing (the number boxes work on it)
+    const items = selectedItems();
+    ED.selLabel.textContent = items.length > 1 ? `${items.length} things selected` : sel ? (sel.kind === 'spawn' ? 'Start point' : `${sel.kind.replace(/s$/, '')} #${sel.index + 1}`) : 'Nothing selected (pick a tool, then click or drag)';
     for (const k of ['x', 'y', 'w', 'h']) {
         const has = !!sel && k in sel.item;
         ED[k].value = has ? String(Math.round(sel.item[k] * 10) / 10) : '';
         ED[k].disabled = !has;
     }
-    ED.dim.value = sel && sel.item.dim ? sel.item.dim : EDIT.dim;
+    const dims = [...new Set(items.filter((s) => s.item.dim).map((s) => s.item.dim))];
+    ED.dim.value = dims.length === 1 ? dims[0] : EDIT.dim;
+    const isText = !!sel && sel.kind === 'texts';
+    ED.textRow.classList.toggle('hidden', !isText);
+    if (isText && document.activeElement !== ED.text) ED.text.value = sel.item.text;
+    if (isText) ED.size.value = String(sel.item.size);
+    const cardItems = items.filter((s) => s.kind === 'cards');
+    ED.nowjRow.classList.toggle('hidden', !cardItems.length);
+    ED.nowj.checked = cardItems.length > 0 && cardItems.every((s) => s.item.noWallJump);
+    ED.nogr.checked = cardItems.length > 0 && cardItems.every((s) => s.item.noGrapple);
+    // Boosts: shown for selected boosts, and with the Boost tool (the values the next one gets)
+    const boostItems = items.filter((s) => s.kind === 'boosts');
+    ED.boostRow.classList.toggle('hidden', !boostItems.length && EDIT.tool !== 'boost');
+    const b = boostItems.at(-1)?.item;
+    ED.boostDir.value = String(b ? b.dir : EDIT.boostDir);
+    if (document.activeElement !== ED.boostPower) ED.boostPower.value = String(b ? b.power : EDIT.boostPower);
+}
+
+/** Editor keys: Delete, Esc, Ctrl+C / X / V / D / A, and the arrow keys. */
+function editorKey(e) {
+    const code = e.code;
+    const mod = e.ctrlKey || e.metaKey;
+    if (code === 'Delete' || code === 'Backspace') { e.preventDefault(); editorDelete(); }
+    else if (code === 'Escape') { if (EDIT.sels.length) editorSelectNone(); else closeEditor(true); } // Esc: deselect, then leave
+    else if (mod && code === 'KeyC') { e.preventDefault(); const n = editorCopy(); if (n) showToast(`Copied ${n}`); }
+    else if (mod && code === 'KeyX') { e.preventDefault(); const n = editorCut(); if (n) showToast(`Cut ${n}`); }
+    else if (mod && code === 'KeyV') { // paste where the pointer is
+        e.preventDefault();
+        const at = EDIT.hoverSet ? EDIT.hover : { x: null, y: null };
+        const n = editorPaste(at.x, at.y);
+        showToast(n ? `Pasted ${n}` : 'Nothing copied yet');
+    }
+    else if (mod && code === 'KeyD') { e.preventDefault(); const n = editorDuplicate(); if (n) showToast(`Duplicated ${n}`); }
+    else if (mod && code === 'KeyA') { e.preventDefault(); editorSelectAll(); }
+    else if (code.startsWith('Arrow')) {
+        e.preventDefault();
+        editorNudge(code === 'ArrowLeft' ? -1 : code === 'ArrowRight' ? 1 : 0, code === 'ArrowUp' ? -1 : code === 'ArrowDown' ? 1 : 0);
+    }
+    refreshEditorUi();
 }
 
 function downloadLevel() {
@@ -880,7 +876,11 @@ on('exit-game-btn', 'click', stopGame);
 on('respawn-btn', 'click', respawn);
 on('toggle-bot-btn', 'click', () => setBot(!G.botEnabled));
 on('bot-role-btn', 'click', () => { G.botAlwaysIt = !G.botAlwaysIt; applyBotRole(); });
-on('bot-level-select', 'change', () => { setBotLevel(el.botLevel.value); el.botLevel.blur(); });
+on('bot-level-select', 'change', () => {
+    setBotLevel(el.botLevel.value);
+    el.botLevel.blur();
+    if (isOverdue() && G.active) showToast(`Overdue speed: ${el.botLevel.selectedOptions[0]?.textContent || 'Normal'}${overdueWaiting() ? '' : ' from the next round'}`);
+});
 
 // Menu + chat visibility
 on('hud-more-btn', 'click', () => togglePanel());
@@ -904,6 +904,9 @@ on('toggle-lobby-btn', 'click', () => {
     refreshLobbyUi();
 });
 on('close-lobby-btn', 'click', closePopovers);
+on('editor-btn', 'click', openEditor);
+on('levels-btn', 'click', () => { if (togglePopover('levels')) renderLevels(); });
+on('close-levels-btn', 'click', closePopovers);
 const createRoom = () => {
     const name = $('new-room-input').value.trim();
     if (!name) return;
@@ -920,7 +923,8 @@ on('editor-layer', 'pointerdown', (e) => {
     e.preventDefault();
     ED.layer.setPointerCapture?.(e.pointerId);
     const p = editorPoint(e);
-    editorPointer('down', p.x, p.y);
+    editorPointer('down', p.x, p.y, e.shiftKey || e.ctrlKey || e.metaKey);
+    placedText = EDIT.tool === 'text' && selectedItem()?.kind === 'texts';
     refreshEditorUi();
 });
 on('editor-layer', 'pointermove', (e) => {
@@ -934,6 +938,7 @@ for (const ev of ['pointerup', 'pointercancel']) {
         const p = editorPoint(e);
         editorPointer('up', p.x, p.y);
         refreshEditorUi();
+        if (placedText) { placedText = false; ED.text.focus(); ED.text.select?.(); }
     });
 }
 on('editor-panel', 'click', (e) => {
@@ -941,7 +946,17 @@ on('editor-panel', 'click', (e) => {
     if (b) { setEditorTool(b.dataset.tool); refreshEditorUi(); }
 });
 on('editor-play-btn', 'click', () => closeEditor(true));
+on('editor-copy-btn', 'click', () => { const n = editorCopy(); showToast(n ? `Copied ${n}` : 'Select something first'); });
+on('editor-paste-btn', 'click', () => { const n = editorPaste(); showToast(n ? `Pasted ${n}` : 'Nothing copied yet'); refreshEditorUi(); });
+on('editor-dup-btn', 'click', () => { const n = editorDuplicate(); showToast(n ? `Duplicated ${n}` : 'Select something first'); refreshEditorUi(); });
+on('editor-del-btn', 'click', () => { editorDelete(); refreshEditorUi(); });
 on('editor-snap', 'change', () => { EDIT.snap = Number(ED.snap.value) || 0; });
+on('ed-text', 'input', () => updateSelected({ text: ED.text.value })); // no refresh here, it would move the cursor
+on('ed-size', 'change', () => { updateSelected({ size: ED.size.value }); refreshEditorUi(); });
+on('ed-nowj', 'change', () => { updateSelected({ noWallJump: ED.nowj.checked }); refreshEditorUi(); });
+on('ed-boost-dir', 'change', () => { updateSelected({ dir: ED.boostDir.value }) || setBoostDefaults(); refreshEditorUi(); });
+on('ed-boost-power', 'change', () => { updateSelected({ power: ED.boostPower.value }) || setBoostDefaults(); refreshEditorUi(); });
+on('ed-nogr', 'change', () => { updateSelected({ noGrapple: ED.nogr.checked }); refreshEditorUi(); });
 on('editor-dim', 'change', () => { EDIT.dim = ED.dim.value; updateSelected({ dim: ED.dim.value }); refreshEditorUi(); });
 for (const k of ['x', 'y', 'w', 'h']) on(`ed-${k}`, 'change', () => { updateSelected({ [k]: ED[k].value }); refreshEditorUi(); });
 on('editor-name', 'change', () => { setLevelName(ED.name.value); refreshEditorUi(); });
@@ -1003,7 +1018,7 @@ bridge.pushState = pushState;
 bridge.toast = showToast;
 bridge.updateHud = updateHud;
 bridge.respawn = respawn;
-bridge.mapChanged = refreshMapSelect;
+bridge.mapChanged = renderLevels;
 hooks.message = handleMessage;
 hooks.status = setNetStatus;
 hooks.lobby = refreshLobbyUi;

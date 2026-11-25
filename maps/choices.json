@@ -1,0 +1,21 @@
+{
+  "format": "super-class-bros-level",
+  "version": 1,
+  "name": "Choices",
+  "size": [1440, 810],
+  "spawn": {"x":160,"y":580},
+  "cards": [
+    {"x":260,"y":580,"w":950,"h":60,"dim":"b"},
+    {"x":150,"y":580,"w":160,"h":120,"dim":"both"},
+    {"x":1160,"y":580,"w":160,"h":120,"dim":"both"},
+    {"x":610,"y":270,"w":160,"h":120,"dim":"a"}
+  ],
+  "ledges": [],
+  "springs": [],
+  "boosts": [],
+  "flags": [
+    {"x":1300,"y":580}
+  ],
+  "pickups": [],
+  "texts": []
+}

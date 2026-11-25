@@ -58,3 +58,6 @@ body {
 /* Parts of the menu that only apply to Tag and its variants (or to plain Tag) */
 #game-hud[data-mode="platformer"] .tag-only { display: none !important; }
 #game-hud:not([data-mode="tag"]) .classic-only { display: none !important; }
+#game-hud[data-mode="overdue"] .no-od { display: none !important; } /* no IT and no tags in Overdue */
+/* Parts of the menu that only apply to the Platformer */
+#game-hud:not([data-mode="platformer"]) .pf-only { display: none !important; }

@@ -3,5 +3,14 @@
   "jump.json",
   "swing.json",
   "swing-and-swap.json",
-  "penguin.json"
+  "penguin.json",
+  "up-and-dash.json",
+  "momentum.json",
+  "speed.json",
+  "choices.json",
+  "frame-perfect.json",
+  "speed-up.json",
+  "tunnel-vision.json",
+  "jank.json",
+  "hectic.json"
 ]

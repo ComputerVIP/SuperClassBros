@@ -1,0 +1,26 @@
+{
+  "format": "super-class-bros-level",
+  "version": 1,
+  "name": "Hectic",
+  "size": [1440, 810],
+  "spawn": {"x":640,"y":400},
+  "cards": [
+    {"x":540,"y":330,"w":70,"h":150,"dim":"both"},
+    {"x":540,"y":260,"w":350,"h":90,"dim":"both"},
+    {"x":830,"y":390,"w":60,"h":90,"dim":"both"},
+    {"x":540,"y":480,"w":350,"h":70,"dim":"both"}
+  ],
+  "ledges": [],
+  "springs": [
+    {"x":700,"y":470,"w":140,"h":14,"dim":"both"}
+  ],
+  "boosts": [
+    {"x":610,"y":350,"w":60,"h":130,"dim":"both","dir":0,"power":700},
+    {"x":770,"y":340,"w":60,"h":60,"dim":"both","dir":180,"power":1000}
+  ],
+  "flags": [
+    {"x":870,"y":390}
+  ],
+  "pickups": [],
+  "texts": []
+}

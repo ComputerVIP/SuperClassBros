@@ -50,10 +50,11 @@
                 <input id="room-code-input" type="text" maxlength="12" value="UCAS-1" title="Type any room code and press Enter" class="w-[72px] bg-slate-900/90 text-emerald-300 font-mono font-bold text-[11px] px-1.5 py-0.5 rounded border border-slate-600 focus:outline-none focus:border-emerald-400 uppercase" />
                 <select id="mode-select" title="Server type" class="w-[78px] bg-slate-900/90 text-amber-200 font-bold text-[11px] px-1 py-0.5 rounded border border-slate-600 focus:outline-none focus:border-amber-400 cursor-pointer">
                     <option value="tag">Tag</option>
-                    <option value="infection" hidden disabled>Infection</option>
-                    <option value="freeze" hidden disabled>Freeze Tag</option>
-                    <option value="potato" hidden disabled>Hot Potato</option>
-                    <option value="platformer" disabled>Platformer, IN PROGRESS</option>
+                    <option value="infection">Infection</option>
+                    <option value="freeze">Freeze Tag</option>
+                    <option value="potato">Hot Potato</option>
+                    <option value="overdue">Overdue</option>
+                    <option value="platformer">Platformer</option>
                 </select>
                 <button id="toggle-lobby-btn" title="Browse and join active rooms" class="px-2 py-0.5 rounded bg-emerald-600/80 hover:bg-emerald-500 text-[10px] text-white font-bold transition cursor-pointer flex items-center gap-1">
                     <span>Lobby</span>
@@ -68,6 +69,8 @@
                 </button>
                 <button id="toggle-customizer-btn" title="Name and color" class="px-2.5 py-1 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-[11px] font-semibold text-slate-200 transition cursor-pointer">Style</button>
                 <button id="respawn-btn" title="Respawn" class="px-2.5 py-1 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-[11px] font-semibold text-slate-200 transition cursor-pointer">Respawn</button>
+                <button id="editor-btn" title="Build your own level (Platformer)" class="pf-only px-2.5 py-1 rounded-full bg-blue-700/70 hover:bg-blue-600 border border-blue-500 text-[11px] font-semibold text-blue-100 transition cursor-pointer">Editor</button>
+                    <button id="levels-btn" title="Pick a level and see your best times" class="pf-only px-2.5 py-1 rounded-full bg-emerald-700/70 hover:bg-emerald-600 border border-emerald-500 text-[11px] font-semibold text-emerald-100 transition cursor-pointer">Levels</button>
                 <button id="toggle-bot-btn" class="tag-only px-2.5 py-1 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-[11px] font-semibold text-emerald-300 transition cursor-pointer flex items-center gap-1.5">
                     <span id="bot-indicator" class="w-2 h-2 rounded-full bg-emerald-400"></span>
                     <span id="bot-btn-text">Bot: ON</span>
@@ -88,20 +91,17 @@
             <div id="dev-panel" class="hidden space-y-1.5 rounded-lg bg-slate-900/70 border border-amber-500/40 p-2">
                 <div class="flex items-center justify-between gap-2">
                     <span class="font-bold text-amber-300 text-[11px]">Developer</span>
-                    <span class="flex gap-1">
-                        <button id="dev-copy-btn" title="Copy changed values to the clipboard" class="px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-[10px] text-slate-200 cursor-pointer">Copy tuning</button>
-                        <button id="dev-reset-btn" class="px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-[10px] text-slate-200 cursor-pointer">Reset</button>
-                    </span>
                 </div>
-                <button id="dev-editor-btn" class="w-full px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-[11px] font-bold text-white cursor-pointer">Open level editor (Platformer)</button>
                 <div id="dev-bots" class="flex items-center gap-1.5"></div>
-                <div id="dev-lab" class="space-y-1 border-b border-amber-500/30 pb-1.5"></div>
                 <div id="dev-toggles" class="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-200"></div>
                 <div id="dev-sliders" class="space-y-0.5 max-h-40 overflow-y-auto pr-1"></div>
             </div>
 
             <p class="text-[10px] text-slate-400 leading-snug">
                 <b class="text-slate-200">WASD</b> move · <b class="text-slate-200">W/Space</b> jump · <b class="text-slate-200">E</b> grapple · <b class="text-slate-200">Shift</b> dash · <b class="text-slate-200">S</b> drop/dive · <b class="text-slate-200">H</b> hide menu
+            </p>
+            <p class="pf-only text-[10px] text-slate-400 leading-snug">
+                <b class="text-slate-200">Shift + a direction</b> dashes that way · <b class="text-slate-200">S</b> slides (tap <b class="text-slate-200">S</b> again for more speed) · <b class="text-slate-200">Tab</b> flips dimension · <b class="text-slate-200">[ ]</b> change level · <b class="text-slate-200">G G</b> reset this level's best time
             </p>
         </div>
 
@@ -110,8 +110,8 @@
             <div id="hud-p1" class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-600/30 border border-blue-400/40 transition-all">
                 <span id="p1-color-dot" class="w-2.5 h-2.5 rounded-sm bg-blue-400 inline-block"></span>
                 <span id="p1-label" class="font-bold text-blue-200 max-w-[90px] truncate">Runner</span>
-                <span id="p1-it-tag" class="tag-only hidden px-1.5 rounded bg-amber-400 text-slate-950 font-black text-[10px] tracking-wide">IT!</span>
-                <span id="p1-score" class="tag-only font-mono font-bold text-white" title="Tags landed">0</span>
+                <span id="p1-it-tag" class="tag-only no-od hidden px-1.5 rounded bg-amber-400 text-slate-950 font-black text-[10px] tracking-wide">IT!</span>
+                <span id="p1-score" class="tag-only no-od font-mono font-bold text-white" title="Tags landed">0</span>
             </div>
             <span id="net-status-dot" class="w-2 h-2 rounded-full bg-amber-400 animate-pulse" title="Connecting..."></span>
             <span id="player-count-badge" class="font-mono text-[10px] text-emerald-300" title="Players in this room">1 online</span>
@@ -145,7 +145,7 @@
     <!-- LEVEL BACKDROP: covers the page while the Platformer is on, because it draws its own level -->
     <div id="level-backdrop" class="hidden fixed inset-0 z-[9985] bg-slate-800"></div>
 
-    <!-- LEVEL EDITOR (Platformer, developer mode): the layer catches the pointer, the panel is the toolbar -->
+    <!-- LEVEL EDITOR (Platformer): the layer catches the pointer, the panel is the toolbar -->
     <div id="editor-layer" class="hidden fixed inset-0 z-[9996] cursor-crosshair" style="touch-action: none"></div>
     <div id="editor-panel" class="hidden fixed top-3 left-3 z-[10001] w-[270px] max-h-[calc(100vh-1.5rem)] overflow-y-auto p-3 rounded-2xl bg-[#1f2937]/95 text-white shadow-2xl border border-slate-600 backdrop-blur-md text-xs space-y-2.5">
         <div class="flex items-center justify-between">
@@ -155,12 +155,21 @@
         <div class="grid grid-cols-4 gap-1">
             <button data-tool="select" title="Pick, move and resize" class="px-1 py-1 rounded bg-blue-600 hover:bg-blue-500 text-[10px] font-semibold cursor-pointer">Select</button>
             <button data-tool="card" title="Drag out a solid card" class="px-1 py-1 rounded bg-slate-700 hover:bg-slate-600 text-[10px] font-semibold cursor-pointer">Card</button>
+            <button data-tool="nwcard" title="Drag out a card you cannot wall jump off" class="px-1 py-1 rounded bg-slate-700 hover:bg-red-700 text-[10px] font-semibold cursor-pointer">No-WJ</button>
             <button data-tool="ledge" title="Drag out a one-way ledge" class="px-1 py-1 rounded bg-slate-700 hover:bg-slate-600 text-[10px] font-semibold cursor-pointer">Ledge</button>
             <button data-tool="spring" title="Drag out a spring pad" class="px-1 py-1 rounded bg-slate-700 hover:bg-slate-600 text-[10px] font-semibold cursor-pointer">Spring</button>
+            <button data-tool="boost" title="Drag out a speed boost: while you are in it, it brings you up to its speed the way its arrows point (works while grappling)" class="px-1 py-1 rounded bg-slate-700 hover:bg-orange-600 text-[10px] font-semibold cursor-pointer">Boost</button>
             <button data-tool="flag" title="Place a flag (checkpoints run in the order you place them)" class="px-1 py-1 rounded bg-slate-700 hover:bg-slate-600 text-[10px] font-semibold cursor-pointer">Flag</button>
-            <button data-tool="pickup" title="Place a coin (used by the Overdue game)" class="px-1 py-1 rounded bg-slate-700 hover:bg-slate-600 text-[10px] font-semibold cursor-pointer">Coin</button>
+            <button data-tool="pickup" title="Place a coin (not used by any game yet)" class="px-1 py-1 rounded bg-slate-700 hover:bg-slate-600 text-[10px] font-semibold cursor-pointer">Coin</button>
             <button data-tool="spawn" title="Move the start point" class="px-1 py-1 rounded bg-slate-700 hover:bg-slate-600 text-[10px] font-semibold cursor-pointer">Start</button>
+            <button data-tool="text" title="Place a line of text (then type it in the Text box)" class="px-1 py-1 rounded bg-slate-700 hover:bg-slate-600 text-[10px] font-semibold cursor-pointer">Text</button>
             <button data-tool="erase" title="Click something to delete it" class="px-1 py-1 rounded bg-slate-700 hover:bg-rose-600 text-[10px] font-semibold cursor-pointer">Erase</button>
+        </div>
+        <div class="grid grid-cols-4 gap-1">
+            <button id="editor-copy-btn" title="Copy the selection (Ctrl+C)" class="px-1 py-1 rounded bg-slate-700 hover:bg-slate-600 text-[10px] font-semibold cursor-pointer">Copy</button>
+            <button id="editor-paste-btn" title="Paste (Ctrl+V pastes where the pointer is)" class="px-1 py-1 rounded bg-slate-700 hover:bg-slate-600 text-[10px] font-semibold cursor-pointer">Paste</button>
+            <button id="editor-dup-btn" title="Copy and paste in one go (Ctrl+D)" class="px-1 py-1 rounded bg-slate-700 hover:bg-slate-600 text-[10px] font-semibold cursor-pointer">Duplicate</button>
+            <button id="editor-del-btn" title="Delete the selection (Delete key)" class="px-1 py-1 rounded bg-slate-700 hover:bg-rose-600 text-[10px] font-semibold cursor-pointer">Delete</button>
         </div>
         <div class="flex items-center gap-3 text-[10px] text-slate-300">
             <label class="flex items-center gap-1">Snap
@@ -182,6 +191,27 @@
                 <label class="text-[9px] text-slate-400">w<input id="ed-w" type="number" step="1" class="w-full bg-slate-800 text-white rounded border border-slate-600 px-1 py-0.5 text-[10px] disabled:opacity-30"></label>
                 <label class="text-[9px] text-slate-400">h<input id="ed-h" type="number" step="1" class="w-full bg-slate-800 text-white rounded border border-slate-600 px-1 py-0.5 text-[10px] disabled:opacity-30"></label>
             </div>
+            <div id="ed-text-row" class="hidden">
+                <div class="flex items-end gap-1.5">
+                    <label class="min-w-0 flex-1 text-[9px] text-slate-400">text<input id="ed-text" maxlength="80" class="w-full bg-slate-800 text-white rounded border border-slate-600 px-1 py-0.5 text-[11px]"></label>
+                    <label class="w-14 text-[9px] text-slate-400">size<input id="ed-size" type="number" min="8" max="96" step="1" class="w-full bg-slate-800 text-white rounded border border-slate-600 px-1 py-0.5 text-[10px]"></label>
+                </div>
+            </div>
+            <div id="ed-boost-row" class="hidden">
+                <div class="flex items-end gap-1.5">
+                    <label class="min-w-0 flex-1 text-[9px] text-slate-400">boost direction
+                        <select id="ed-boost-dir" class="w-full bg-slate-800 text-white rounded border border-slate-600 px-1 py-0.5 text-[10px] cursor-pointer">
+                            <option value="0">&rarr; Right</option><option value="45">&#8599; Up-right</option><option value="90">&uarr; Up</option><option value="135">&#8598; Up-left</option>
+                            <option value="180">&larr; Left</option><option value="225">&#8601; Down-left</option><option value="270">&darr; Down</option><option value="315">&#8600; Down-right</option>
+                        </select>
+                    </label>
+                    <label class="w-16 text-[9px] text-slate-400" title="The speed it brings you up to, its way (100 to 2000; running is about 295)">speed<input id="ed-boost-power" type="number" min="100" max="2000" step="50" class="w-full bg-slate-800 text-white rounded border border-slate-600 px-1 py-0.5 text-[10px]"></label>
+                </div>
+            </div>
+            <div id="ed-nowj-row" class="hidden">
+                <label class="flex items-center gap-1.5 text-[10px] text-slate-200 cursor-pointer"><input id="ed-nowj" type="checkbox" class="accent-red-500"> No wall jump on these cards</label>
+                <label class="flex items-center gap-1.5 text-[10px] text-slate-200 cursor-pointer"><input id="ed-nogr" type="checkbox" class="accent-violet-500"> No grapple on these cards</label>
+            </div>
         </div>
         <label class="block text-[10px] text-slate-300">Map name
             <input id="editor-name" maxlength="40" class="mt-0.5 w-full bg-slate-900 text-white rounded border border-slate-600 px-2 py-1 text-[11px]">
@@ -194,8 +224,19 @@
             <button id="editor-clear-btn" class="col-span-2 px-2 py-1 rounded-lg bg-slate-700 hover:bg-rose-600 font-bold cursor-pointer">Clear everything</button>
         </div>
         <div id="editor-readout" class="font-mono text-[10px] text-slate-400">x, y</div>
-        <p class="text-[10px] text-slate-400 leading-snug">Pick a tool, then click or drag on the level. <b class="text-slate-200">Select</b> moves things and the blue corner resizes them. <b class="text-slate-200">Delete</b> removes the selection. Your work is kept by the browser.</p>
+        <p class="text-[10px] text-slate-400 leading-snug">Pick a tool, then click or drag on the level. With <b class="text-slate-200">Select</b>, drag on empty space to select a group, <b class="text-slate-200">Shift</b>-click to add or remove one, drag to move, and use the blue corner to resize. <b class="text-slate-200">Ctrl+C / V</b> copy and paste (at the pointer), <b class="text-slate-200">Ctrl+D</b> duplicates, <b class="text-slate-200">Ctrl+A</b> selects all, the <b class="text-slate-200">arrow keys</b> nudge, <b class="text-slate-200">Delete</b> removes. Your work is kept by the browser. <b class="text-slate-200">Text</b> places a line of text you type in, and <b class="text-slate-200">No-WJ</b> draws a card you cannot wall jump off.</p>
         <input id="editor-file" type="file" accept=".json,application/json" class="hidden">
+    </div>
+
+    <!-- LEVEL SELECT (Platformer): your best time on every level, and the campaign total -->
+    <div id="levels-popover" class="hidden fixed bottom-14 left-3 z-[10000] w-[320px] max-w-[calc(100vw-1.5rem)] p-3.5 rounded-2xl bg-[#1f2937]/95 text-white shadow-2xl border border-slate-600 backdrop-blur-md text-xs">
+        <div class="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-700">
+            <span class="font-bold text-slate-100">Levels</span>
+            <button id="close-levels-btn" class="text-slate-400 hover:text-white font-bold text-sm px-1 cursor-pointer">×</button>
+        </div>
+        <div id="levels-list" class="max-h-56 overflow-y-auto space-y-1.5 mb-2.5 pr-0.5"></div>
+        <div id="levels-total" class="pt-2 border-t border-slate-700 text-[11px] font-bold text-emerald-300"></div>
+        <p class="mt-1 text-[10px] text-slate-400 leading-snug">Your best time on each level is saved in this browser. The campaign total is your best times added together.</p>
     </div>
 
     <!-- PLAYER CUSTOMIZATION POPOVER -->
@@ -233,10 +274,11 @@
             <input id="new-room-input" type="text" maxlength="12" placeholder="New room name..." class="min-w-0 flex-1 bg-slate-900 text-emerald-300 font-mono uppercase px-2.5 py-1.5 rounded-lg border border-slate-600 focus:outline-none focus:border-emerald-400 text-xs" />
             <select id="new-room-mode" title="Server type" class="w-[78px] bg-slate-900 text-amber-200 font-bold px-1 py-1.5 rounded-lg border border-slate-600 focus:outline-none cursor-pointer">
                 <option value="tag">Tag</option>
-                <option value="infection" hidden disabled>Infection</option>
-                <option value="freeze" hidden disabled>Freeze Tag</option>
-                <option value="potato" hidden disabled>Hot Potato</option>
-                <option value="platformer" disabled>Platformer, IN PROGRESS</option>
+                <option value="infection">Infection</option>
+                <option value="freeze">Freeze Tag</option>
+                <option value="potato">Hot Potato</option>
+                <option value="overdue">Overdue</option>
+                <option value="platformer">Platformer</option>
             </select>
             <button id="create-room-btn" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition cursor-pointer">Join</button>
         </div>

@@ -15,5 +15,8 @@
   "flags": [
     {"x":1420,"y":490}
   ],
-  "pickups": []
+  "pickups": [],
+  "texts": [
+    {"x":260,"y":310,"text":"Tab to switch dimensions","size":20}
+  ]
 }

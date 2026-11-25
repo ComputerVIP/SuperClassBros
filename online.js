@@ -1,5 +1,5 @@
 // ONLINE: networking (MQTT relay, WebRTC mesh, other tabs), lobby discovery, and player snapshots.
-import { G, local, view, makeRunner, roomKey, playerName, MODES, DEV } from './engine.js';
+import { G, local, view, makeRunner, roomKey, playerName, MODES, isPlatformer, mapKey, overdueSnapshot } from './engine.js';
 
 // ===========================================================================
 // NETWORK TRANSPORTS & LOBBIES
@@ -198,7 +198,7 @@ if (channel) {
 // Lobby discovery: who is in which room, across devices
 // ---------------------------------------------------------------------------
 const lobbies = new Map(); // key -> { key, room, mode, players: Map(id -> {name, color, updatedAt}) }
-const DEFAULT_ROOMS = [['tag', 'UCAS-1']];
+const DEFAULT_ROOMS = [['tag', 'UCAS-1'], ['infection', 'UCAS-1'], ['freeze', 'UCAS-1'], ['potato', 'UCAS-1'], ['overdue', 'UCAS-1'], ['platformer', 'UCAS-1']];
 
 function ensureLobby(mode, room) {
     const key = `${mode}-${room}`.toLowerCase();
@@ -237,7 +237,7 @@ export function getLobbies() {
         const keep = DEFAULT_ROOMS.some(([m, r]) => `${m}-${r}`.toLowerCase() === key) || key === roomKey();
         if (!lobby.players.size && !keep) lobbies.delete(key);
     }
-    return [...lobbies.values()].filter((l) => !MODES[l.mode].dev || DEV).sort((a, b) =>
+    return [...lobbies.values()].sort((a, b) =>
         (b.key === roomKey()) - (a.key === roomKey()) || b.players.size - a.players.size);
 }
 
@@ -261,6 +261,7 @@ export function buildPayload() {
     return {
         id: G.playerId,
         room: roomKey(),
+        map: isPlatformer() ? mapKey() : '', // Platformer: you only see players who are on the same level
         nx: pos.nx,
         by: pos.by,
         vx: Math.round(local.vx),
@@ -279,6 +280,7 @@ export function buildPayload() {
         grappleActive: g.active,
         gax: anchor.nx,
         gby: anchor.by,
+        od: overdueSnapshot(), // Overdue host only: the floor, the dots and the round
         updatedAt: Date.now(),
     };
 }
@@ -303,6 +305,8 @@ function copyFields(rp, d) {
         scarfColor: d.scarfColor || rp.scarfColor,
         hatColor: d.hatColor || rp.hatColor,
         label: d.label || rp.label,
+        od: d.od && typeof d.od === 'object' ? d.od : null,
+        odAt: d.updatedAt || 0,
         lastSeen: Date.now(),
     });
     const a = fromShared(d.gax, d.gby);
@@ -314,6 +318,10 @@ function copyFields(rp, d) {
 /** Returns true if this snapshot created a new remote player. */
 export function applyPayload(d) {
     if (!d || d.id === G.playerId || d.room !== roomKey()) return false;
+    if (isPlatformer() && d.map !== mapKey()) { // they are on a different level: not part of this one
+        if (G.remotes.delete(d.id)) hooks.count();
+        return false;
+    }
     if (Date.now() - (d.updatedAt || 0) > STALE_MS) {
         G.remotes.delete(d.id);
         return false;
