@@ -1,0 +1,19 @@
+{
+  "format": "super-class-bros-level",
+  "version": 1,
+  "name": "Basic",
+  "size": [1440, 810],
+  "spawn": {"x":310,"y":500},
+  "cards": [
+    {"x":300,"y":500,"w":160,"h":120,"dim":"both"},
+    {"x":470,"y":500,"w":160,"h":120,"dim":"both"},
+    {"x":640,"y":500,"w":160,"h":120,"dim":"both"},
+    {"x":810,"y":500,"w":160,"h":120,"dim":"both"}
+  ],
+  "ledges": [],
+  "springs": [],
+  "flags": [
+    {"x":960,"y":500}
+  ],
+  "pickups": []
+}

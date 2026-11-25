@@ -47,14 +47,14 @@ body {
     z-index: 9990;
 }
 
-/* Game menu pill: hidden when the game is off, or collapsed by the player */
-.hud-pill { transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease; }
-.hud-pill.hidden-hud { transform: translate(-50%, 140%); opacity: 0; pointer-events: none; }
-.hud-pill.visible-hud { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
-.hud-pill.menu-collapsed { transform: translate(-50%, 140%); opacity: 0; pointer-events: none; }
+/* Game menu: hidden when the game is off or collapsed by the player, faded until hovered */
+.hud-pill { transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease; }
+.hud-pill.hidden-hud,
+.hud-pill.menu-collapsed { transform: translateY(160%); opacity: 0; pointer-events: none; }
+.hud-pill.visible-hud { transform: none; opacity: 0.78; pointer-events: auto; }
+.hud-pill.visible-hud:hover,
+.hud-pill.visible-hud:focus-within { opacity: 1; }
 
-/* Mode-specific menu parts */
-#game-hud[data-mode="tag"] .fight-only,
-#game-hud[data-mode="fight"] .tag-only { display: none !important; }
-#customizer-popover .fight-only { display: none; }
-body:has(#game-hud[data-mode="fight"]) #customizer-popover .fight-only { display: inline; }
+/* Parts of the menu that only apply to Tag and its variants (or to plain Tag) */
+#game-hud[data-mode="platformer"] .tag-only { display: none !important; }
+#game-hud:not([data-mode="tag"]) .classic-only { display: none !important; }

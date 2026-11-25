@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard — Canvas LMS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.10.1/mqtt.min.js';"></script>
+    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js';"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,300;0,400;0,700;0,900;1,400&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Lato', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+                        serif: ['Playfair Display', 'Georgia', 'serif'],
+                    },
+                    colors: {
+                        canvas: {
+                            text: '#2d3b45',
+                            muted: '#6c757d',
+                            border: '#c7cdd1',
+                            lightBorder: '#e2e6ea',
+                            bg: '#ffffff',
+                            btnBg: '#f5f5f5',
+                            btnHover: '#e8e8e8',
+                            ucasGreen: '#1c5c43',
+                            ucasDark: '#123e2d',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-white text-canvas-text select-none">
+
+    <!-- SECRET GAME OVERLAY CANVAS -->
+    <canvas id="ui-tag-canvas"></canvas>
+
+    <!-- GAME MENU PILL (hidden until the secret button is clicked; can be collapsed with the "–" button or H) -->
+    <div id="game-hud" data-mode="tag" class="hud-pill hidden-hud fixed bottom-4 left-1/2 z-[9999] flex flex-wrap items-center justify-center gap-2 sm:gap-2.5 px-3.5 py-2 rounded-full bg-[#1f2937]/95 text-white shadow-2xl border border-slate-600/70 backdrop-blur-md text-xs max-w-[96vw]">
+
+        <!-- Local player: status + customization -->
+        <div id="hud-p1" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-600/30 border border-blue-400/40 transition-all">
+            <span id="p1-color-dot" class="w-2.5 h-2.5 rounded-sm bg-blue-400 inline-block"></span>
+            <span id="p1-label" class="font-bold text-blue-200 max-w-[92px] truncate">Runner</span>
+            <span id="p1-health-label" class="fight-only font-mono text-[10px] text-emerald-300" title="Health">HP 100</span>
+            <span id="p1-combo-label" class="fight-only hidden font-black text-[10px] text-fuchsia-300" title="Combo">COMBO 0</span>
+            <button id="toggle-customizer-btn" title="Customize Name & Color" class="px-1.5 py-0.5 rounded bg-slate-700/90 hover:bg-slate-600 text-[10px] text-slate-200 font-semibold transition cursor-pointer">Style</button>
+            <span class="tag-only text-[10px] text-blue-300/90 hidden xl:inline">WASD · <b class="text-white">E</b> Swing · <b class="text-white">Shift</b> Dash · <b class="text-white">S</b> Slam</span>
+            <span class="fight-only text-[10px] text-blue-300/90 hidden xl:inline">WASD · <b class="text-white">E</b> Swing · <b class="text-white">Shift</b> Dash · <b class="text-white">J</b> Combo · <b class="text-white">K</b> Heavy · <b class="text-white">L</b> Guard · <b class="text-white">S</b> Slam</span>
+            <span id="p1-it-tag" class="tag-only hidden px-1.5 rounded bg-amber-400 text-slate-950 font-black text-[10px] tracking-wide">IT!</span>
+            <span id="p1-score" class="ml-1 font-mono font-bold text-white" title="Tags Landed">0</span>
+        </div>
+
+        <!-- Room, server type and lobby browser -->
+        <div id="hud-room-box" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/90 border border-slate-600">
+            <span id="net-status-dot" class="w-2 h-2 rounded-full bg-amber-400 animate-pulse" title="Connecting..."></span>
+            <span class="text-[10px] text-slate-400">Room:</span>
+            <input id="room-code-input" type="text" maxlength="12" value="UCAS-1" title="Type any room code and press Enter" class="w-16 bg-slate-900/90 text-emerald-300 font-mono font-bold text-[11px] px-1.5 py-0.5 rounded border border-slate-600 focus:outline-none focus:border-emerald-400 uppercase" />
+            <select id="mode-select" title="Server type" class="w-[68px] bg-slate-900/90 text-amber-200 font-bold text-[11px] px-1 py-0.5 rounded border border-slate-600 focus:outline-none focus:border-amber-400 cursor-pointer">
+                <option value="tag">Tag</option>
+                <option value="fight">Fight</option>
+                <option value="platformer" disabled>Platformer, IN PROGRESS</option>
+            </select>
+            <button id="toggle-lobby-btn" title="Browse & Join Active Rooms" class="px-2 py-0.5 rounded bg-emerald-600/80 hover:bg-emerald-500 text-[10px] text-white font-bold transition cursor-pointer flex items-center gap-1">
+                <span>Lobby</span>
+                <span id="lobby-rooms-count" class="px-1 rounded-full bg-black/30 text-[9px]">2</span>
+            </button>
+            <span id="player-count-badge" class="px-1.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 font-bold text-[10px]" title="Connected Players in Room">1 Online</span>
+        </div>
+
+        <!-- Chat toggle -->
+        <button id="chat-toggle-btn" title="Open / close chat" class="relative px-2.5 py-1 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-[11px] font-semibold text-cyan-300 transition cursor-pointer">
+            Chat
+            <span id="chat-unread" class="hidden absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-rose-500"></span>
+        </button>
+
+        <!-- Bot toggle -->
+        <button id="toggle-bot-btn" class="px-2.5 py-1 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-[11px] font-semibold text-emerald-300 transition cursor-pointer flex items-center gap-1.5">
+            <span id="bot-indicator" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            <span id="bot-btn-text">Bot: ON</span>
+        </button>
+
+        <!-- Bot role (Tag only): normal, or always IT for running practice -->
+        <button id="bot-role-btn" class="tag-only px-2.5 py-1 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-[11px] font-semibold text-slate-300 transition cursor-pointer">Bot: Normal</button>
+
+        <!-- Follow camera (Fight only) -->
+        <button id="cam-toggle-btn" title="Follow camera: slight zoom that gently tracks you" class="fight-only px-2.5 py-1 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-[11px] font-semibold text-slate-300 transition cursor-pointer">Cam: OFF</button>
+
+        <!-- Respawn -->
+        <button id="respawn-btn" title="Respawn Runner" class="p-1.5 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-200 transition cursor-pointer">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        </button>
+
+        <!-- Hide menu (press H or click the tab to bring it back) -->
+        <button id="hide-menu-btn" title="Hide menu (H)" class="w-6 h-6 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold flex items-center justify-center transition cursor-pointer">–</button>
+
+        <!-- Exit game -->
+        <button id="exit-game-btn" title="Exit game" class="w-6 h-6 rounded-full bg-rose-500/80 hover:bg-rose-500 text-white font-bold flex items-center justify-center transition cursor-pointer">×</button>
+    </div>
+
+    <!-- Tab that brings the menu back after it was hidden -->
+    <button id="hud-tab" title="Show menu (H)" class="hidden fixed bottom-0 left-1/2 -translate-x-1/2 z-[9999] px-4 py-0.5 rounded-t-lg bg-[#1f2937]/90 hover:bg-[#1f2937] text-slate-200 text-[11px] font-semibold border border-b-0 border-slate-600/70 cursor-pointer">▴ Menu</button>
+
+    <!-- ROOM CHAT (closed by default; open it with the Chat button) -->
+    <div id="chat-panel" class="hidden fixed right-4 bottom-16 z-[10000] w-[320px] max-w-[calc(100vw-2rem)] rounded-2xl bg-[#111827]/95 text-white shadow-2xl border border-slate-600 backdrop-blur-md overflow-hidden">
+        <div class="flex items-center justify-between px-3 py-2 border-b border-slate-700">
+            <div>
+                <div class="font-bold text-sm">Room Chat</div>
+                <div id="chat-room-label" class="text-[9px] text-emerald-300 font-mono">TAG · UCAS-1</div>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="flex items-center gap-1 text-[9px] text-emerald-300 font-bold">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>LIVE
+                </span>
+                <button id="chat-close-btn" title="Close chat" class="text-slate-400 hover:text-white font-bold text-base leading-none px-1 cursor-pointer">×</button>
+            </div>
+        </div>
+        <div id="chat-messages" class="h-52 overflow-y-auto px-3 py-2 space-y-1.5 text-xs"></div>
+        <form id="chat-form" class="flex gap-2 p-2 border-t border-slate-700">
+            <input id="chat-input" maxlength="120" autocomplete="off" placeholder="Trash talk..." class="min-w-0 flex-1 rounded-lg bg-slate-900 border border-slate-600 px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+            <button type="submit" class="rounded-lg bg-cyan-600 hover:bg-cyan-500 px-3 py-1.5 text-xs font-bold">Send</button>
+        </form>
+    </div>
+
+    <!-- PLAYER CUSTOMIZATION POPOVER -->
+    <div id="customizer-popover" class="hidden fixed bottom-16 left-1/2 -translate-x-1/2 z-[10000] w-[300px] p-3.5 rounded-2xl bg-[#1f2937]/95 text-white shadow-2xl border border-slate-600 backdrop-blur-md text-xs">
+        <div class="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-700">
+            <span class="font-bold text-slate-100">Runner Customization</span>
+            <button id="close-customizer-btn" class="text-slate-400 hover:text-white font-bold text-sm px-1 cursor-pointer">×</button>
+        </div>
+        <div class="space-y-3">
+            <div>
+                <label for="player-name-input" class="block text-[11px] text-slate-300 mb-1">Display Name</label>
+                <div class="flex gap-1.5">
+                    <input id="player-name-input" type="text" maxlength="14" placeholder="Enter your name..." class="flex-1 bg-slate-900 text-white px-2.5 py-1.5 rounded-lg border border-slate-600 focus:outline-none focus:border-blue-400 text-xs" />
+                    <button id="save-name-btn" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold transition cursor-pointer">Save</button>
+                </div>
+            </div>
+            <div>
+                <span class="block text-[11px] text-slate-300 mb-1.5">Runner Color</span>
+                <div id="color-swatch-grid" class="grid grid-cols-5 gap-2"></div>
+            </div>
+            <div class="pt-1 border-t border-slate-700/80 text-[10px] text-slate-400 leading-relaxed">
+                <b class="text-slate-200">Moves:</b> <span class="text-blue-300">W/Space</span> Double Jump & Wall-Jump · <span class="text-amber-300">E</span> Swing Hook · <span class="text-emerald-300">Shift / C</span> Dash · <span class="text-rose-300">S</span> Ground Slam · <span class="text-slate-200">H</span> Hide menu
+                <span class="fight-only"><br><b class="text-slate-200">Fight:</b> <span class="text-fuchsia-300">J</span> 3-hit combo · <span class="text-orange-300">Hold K</span> Charged Heavy · <span class="text-cyan-300">L</span> Guard</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- LOBBY BROWSER POPOVER -->
+    <div id="lobby-popover" class="hidden fixed bottom-16 left-1/2 -translate-x-1/2 z-[10000] w-[340px] p-3.5 rounded-2xl bg-[#1f2937]/95 text-white shadow-2xl border border-slate-600 backdrop-blur-md text-xs">
+        <div class="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-700">
+            <div class="flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span class="font-bold text-slate-100">Active Lobbies</span>
+            </div>
+            <button id="close-lobby-btn" class="text-slate-400 hover:text-white font-bold text-sm px-1 cursor-pointer">×</button>
+        </div>
+        <div id="lobby-list" class="max-h-48 overflow-y-auto space-y-1.5 mb-2.5 pr-0.5"></div>
+        <div class="pt-2 border-t border-slate-700 flex items-center gap-1.5">
+            <input id="new-room-input" type="text" maxlength="12" placeholder="New room name..." class="min-w-0 flex-1 bg-slate-900 text-emerald-300 font-mono uppercase px-2.5 py-1.5 rounded-lg border border-slate-600 focus:outline-none focus:border-emerald-400 text-xs" />
+            <select id="new-room-mode" title="Server type" class="w-[68px] bg-slate-900 text-amber-200 font-bold px-1 py-1.5 rounded-lg border border-slate-600 focus:outline-none cursor-pointer">
+                <option value="tag">Tag</option>
+                <option value="fight">Fight</option>
+                <option value="platformer" disabled>Platformer, IN PROGRESS</option>
+            </select>
+            <button id="create-room-btn" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition cursor-pointer">Join</button>
+        </div>
+    </div>
+
+    <!-- PAGE ROOT: the whole fake Canvas page. The Fight camera zooms/pans this element. -->
+    <div id="page-root" class="flex flex-col md:flex-row min-h-screen w-full">
+
+    <!-- =====================================================================
+         1. LEFT GLOBAL NAVIGATION SIDEBAR (84px wide on desktop, top bar on mobile)
+         ===================================================================== -->
+    <nav id="global-nav" class="w-full md:w-[84px] bg-white border-b md:border-b-0 md:border-r border-[#e2e6ea] flex md:flex-col items-center justify-between shrink-0 z-20 px-2 md:px-0 py-1.5 md:py-0">
+        
+        <div class="flex md:flex-col items-center w-full overflow-x-auto md:overflow-visible">
+            <!-- Top Left UCAS Logo -->
+            <div data-obstacle="true" class="flex flex-col items-center justify-center py-1.5 md:py-3 px-2 md:w-full shrink-0">
+                <svg class="w-14 h-8" viewBox="0 0 120 62" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <text x="5" y="10" fill="#1c5c43" font-family="Lato, sans-serif" font-size="6.2" font-weight="700" letter-spacing="0.3">UTAH COUNTY ACADEMY OF SCIENCES</text>
+                    <text x="6" y="45" fill="#1c5c43" font-family="Lato, sans-serif" font-size="37" font-weight="900" letter-spacing="-1.5">UCAS</text>
+                    <text x="12" y="56" fill="#2d3b45" font-family="Lato, sans-serif" font-size="5.6" font-weight="700" letter-spacing="0.4">STEM EARLY COLLEGE HIGH SCHOOL</text>
+                </svg>
+            </div>
+
+            <!-- Navigation Items -->
+            <ul class="flex md:flex-col items-center w-full gap-0.5 md:gap-0">
+                <!-- Account -->
+                <li class="w-auto md:w-full">
+                    <button data-nav="Account" class="nav-item w-full py-1.5 md:py-2.5 px-2.5 md:px-1 flex flex-col items-center justify-center text-canvas-muted hover:text-canvas-ucasGreen hover:bg-gray-50 transition cursor-pointer">
+                        <div class="w-7 h-7 rounded-full border border-gray-400 flex items-center justify-center mb-0.5 bg-gray-100">
+                            <svg class="w-4 h-4 text-gray-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
+                        </div>
+                        <span class="text-[11px] font-normal leading-tight">Account</span>
+                    </button>
+                </li>
+
+                <!-- Dashboard (Active State) -->
+                <li class="w-auto md:w-full">
+                    <button data-nav="Dashboard" data-obstacle="true" class="nav-item active-nav w-full py-1.5 md:py-2.5 px-2.5 md:px-1 flex flex-col items-center justify-center bg-[#f4f6f8] border-b-2 md:border-b-0 md:border-l-[3px] border-canvas-ucasGreen text-canvas-ucasGreen transition cursor-pointer">
+                        <svg class="w-6 h-6 mb-0.5" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 14l3-3m-3-7a9 9 0 00-9 9c0 2.2.8 4.2 2.1 5.8h13.8A8.96 8.96 0 0021 13a9 9 0 00-9-9z"/>
+                            <path stroke-linecap="round" d="M12 7v1.5M7.5 11.5H9M16.5 11.5H15"/>
+                        </svg>
+                        <span class="text-[11px] font-bold leading-tight">Dashboard</span>
+                    </button>
+                </li>
+
+                <!-- Courses -->
+                <li class="w-auto md:w-full">
+                    <button data-nav="Courses" class="nav-item w-full py-1.5 md:py-2.5 px-2.5 md:px-1 flex flex-col items-center justify-center text-canvas-ucasGreen hover:bg-gray-50 transition cursor-pointer">
+                        <svg class="w-6 h-6 mb-0.5" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4 19.5A2.5 2.5 0 016.5 17H20"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>
+                            <path stroke-linecap="round" d="M8 7h8M8 11h6"/>
+                        </svg>
+                        <span class="text-[11px] font-normal leading-tight text-canvas-text">Courses</span>
+                    </button>
+                </li>
+
+                <!-- Groups -->
+                <li class="w-auto md:w-full">
+                    <button data-nav="Groups" class="nav-item w-full py-1.5 md:py-2.5 px-2.5 md:px-1 flex flex-col items-center justify-center text-canvas-ucasGreen hover:bg-gray-50 transition cursor-pointer">
+                        <svg class="w-6 h-6 mb-0.5" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+                            <circle cx="9" cy="7" r="4"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
+                        </svg>
+                        <span class="text-[11px] font-normal leading-tight text-canvas-text">Groups</span>
+                    </button>
+                </li>
+
+                <!-- Calendar -->
+                <li class="w-auto md:w-full">
+                    <button data-nav="Calendar" class="nav-item w-full py-1.5 md:py-2.5 px-2.5 md:px-1 flex flex-col items-center justify-center text-canvas-ucasGreen hover:bg-gray-50 transition cursor-pointer">
+                        <svg class="w-6 h-6 mb-0.5" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                            <line x1="16" y1="2" x2="16" y2="6"/>
+                            <line x1="8" y1="2" x2="8" y2="6"/>
+                            <line x1="3" y1="10" x2="21" y2="10"/>
+                            <path d="M8 14h2v2H8zM14 14h2v2h-2zM8 18h2v2H8z"/>
+                        </svg>
+                        <span class="text-[11px] font-normal leading-tight text-canvas-text">Calendar</span>
+                    </button>
+                </li>
+
+                <!-- Inbox -->
+                <li class="w-auto md:w-full">
+                    <button data-nav="Inbox" class="nav-item w-full py-1.5 md:py-2.5 px-2.5 md:px-1 flex flex-col items-center justify-center text-canvas-ucasGreen hover:bg-gray-50 transition cursor-pointer">
+                        <svg class="w-6 h-6 mb-0.5" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+                            <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>
+                            <path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/>
+                        </svg>
+                        <span class="text-[11px] font-normal leading-tight text-canvas-text">Inbox</span>
+                    </button>
+                </li>
+
+                <!-- History -->
+                <li class="w-auto md:w-full">
+                    <button data-nav="History" class="nav-item w-full py-1.5 md:py-2.5 px-2.5 md:px-1 flex flex-col items-center justify-center text-canvas-ucasGreen hover:bg-gray-50 transition cursor-pointer">
+                        <svg class="w-6 h-6 mb-0.5" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="9"/>
+                            <polyline points="12 7 12 12 15 14"/>
+                        </svg>
+                        <span class="text-[11px] font-normal leading-tight text-canvas-text">History</span>
+                    </button>
+                </li>
+
+                <!-- Help -->
+                <li class="w-auto md:w-full">
+                    <button data-nav="Help" class="nav-item w-full py-1.5 md:py-2.5 px-2.5 md:px-1 flex flex-col items-center justify-center text-canvas-ucasGreen hover:bg-gray-50 transition cursor-pointer">
+                        <svg class="w-6 h-6 mb-0.5" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="9"/>
+                            <path stroke-linecap="round" d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/>
+                            <circle cx="12" cy="17" r="0.8" fill="currentColor"/>
+                        </svg>
+                        <span class="text-[11px] font-normal leading-tight text-canvas-text">Help</span>
+                    </button>
+                </li>
+            </ul>
+        </div>
+
+        <!-- Bottom Collapse Arrow & Subtle Discovered Toggle -->
+        <div class="hidden md:flex flex-col items-center gap-2 pb-4 w-full">
+            <button id="discovered-tag-pill" title="Resume UI Tag" class="hidden px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-300 text-[10px] font-bold text-canvas-ucasGreen hover:bg-emerald-100 transition cursor-pointer">
+                ▶ Tag
+            </button>
+            <button id="collapse-nav-btn" title="Minimize Global Navigation" class="p-2 text-canvas-ucasGreen hover:bg-gray-100 rounded transition cursor-pointer">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 5v14M19 12H8m0 0l4-4m-4 4l4 4"/>
+                </svg>
+            </button>
+        </div>
+    </nav>
+
+    <!-- =====================================================================
+         2. CENTER MAIN DASHBOARD CONTENT AREA
+         ===================================================================== -->
+    <main class="flex-1 bg-white px-5 sm:px-8 pt-5 pb-12 overflow-y-auto">
+        <div class="max-w-[1040px]">
+            
+            <!-- Dashboard Header Bar -->
+            <header class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-[#c7cdd1]">
+                <h1 id="page-heading" class="text-[28px] font-normal text-canvas-text tracking-tight leading-none">Dashboard</h1>
+
+                <div class="flex items-center gap-2">
+                    <button id="switch-view-btn" data-obstacle="true" class="px-3.5 py-2 rounded-[4px] bg-canvas-btnBg hover:bg-canvas-btnHover border border-canvas-border text-[13px] text-canvas-text font-normal transition cursor-pointer">
+                        Switch to new dashboard view
+                    </button>
+                    <button id="dashboard-options-btn" data-obstacle="true" title="Dashboard Options" class="p-2 rounded-[4px] hover:bg-gray-100 text-canvas-text transition cursor-pointer">
+                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                            <circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/>
+                        </svg>
+                    </button>
+                </div>
+            </header>
+
+            <!-- 3x2 Course Card Grid -->
+            <section id="course-grid" class="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[44px]">
+                
+                <!-- CARD 1: 5th Advisory 11 A - Wishart -->
+                <article data-obstacle="true" class="canvas-card bg-white rounded-[4px] border border-[#c7cdd1] overflow-hidden flex flex-col">
+                    <!-- Banner: Sage Green ADVISORY -->
+                    <div class="relative h-[142px] bg-[#86a689] flex items-center justify-center overflow-hidden border-b border-black/5">
+                        <!-- Subtle woven texture overlay -->
+                        <div class="absolute inset-0 opacity-20" style="background-image: radial-gradient(#2c4a30 1px, transparent 1px); background-size: 8px 8px;"></div>
+                        <span class="font-serif text-[32px] tracking-[0.14em] text-[#3a573e]/80 font-semibold select-none">ADVISORY</span>
+                        <button class="card-menu-btn absolute top-2.5 right-2.5 p-1 rounded-full hover:bg-black/15 text-white transition cursor-pointer" title="Card Options">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                        </button>
+                    </div>
+                    <!-- Card Body -->
+                    <div class="p-3.5 flex-1 flex flex-col justify-between">
+                        <div>
+                            <a href="#course-advisory" class="course-link block text-[13.5px] font-bold text-[#1c5c43] hover:underline truncate">
+                                5th Advisory 11 A - Wishart - 202...
+                            </a>
+                            <div class="text-[12.5px] text-canvas-muted truncate mt-0.5">5th Advisory 11 A - Wishart - ...</div>
+                            <div class="text-[11px] text-canvas-muted truncate mt-0.5">2026/2027 - Utah County Acad. of Scie...</div>
+                        </div>
+                        <!-- Card Footer Action Icons -->
+                        <div class="flex items-center gap-5 pt-3.5 mt-2 text-canvas-muted">
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Announcements">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+                            </button>
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Discussions">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                            </button>
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Files">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- CARD 2: Biology w/lab 1010 CE - Koelling -->
+                <article data-obstacle="true" class="canvas-card bg-white rounded-[4px] border border-[#c7cdd1] overflow-hidden flex flex-col">
+                    <!-- Banner: Deep Plum Biology 1010 Fall -->
+                    <div class="relative h-[142px] bg-gradient-to-br from-[#7c3562] via-[#5e294b] to-[#873d6c] flex flex-col items-center justify-center overflow-hidden border-b border-black/5">
+                        <!-- Subtle cellular SVG pattern -->
+                        <svg class="absolute inset-0 w-full h-full opacity-20" viewBox="0 0 200 100" fill="none">
+                            <circle cx="35" cy="25" r="18" stroke="#f9a8d4" stroke-width="2"/>
+                            <circle cx="165" cy="70" r="24" stroke="#f9a8d4" stroke-width="2"/>
+                            <circle cx="110" cy="18" r="12" stroke="#f9a8d4" stroke-width="1.5"/>
+                        </svg>
+                        <div class="relative text-center leading-tight px-3">
+                            <div class="text-[28px] font-bold text-[#e598c8] tracking-wide drop-shadow-sm">Biology</div>
+                            <div class="text-[25px] font-bold text-[#e598c8] tracking-wide drop-shadow-sm">1010 Fall</div>
+                        </div>
+                        <button class="card-menu-btn absolute top-2.5 right-2.5 p-1 rounded-full hover:bg-black/15 text-white transition cursor-pointer" title="Card Options">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                        </button>
+                    </div>
+                    <!-- Card Body -->
+                    <div class="p-3.5 flex-1 flex flex-col justify-between">
+                        <div>
+                            <a href="#course-bio" class="course-link block text-[13.5px] font-bold text-[#8a2b61] hover:underline truncate">
+                                Biology w/lab 1010 CE - Koelling ...
+                            </a>
+                            <div class="text-[12.5px] text-canvas-muted truncate mt-0.5">Biology w/lab 1010 CE - Koel...</div>
+                            <div class="text-[11px] text-canvas-muted truncate mt-0.5">2026/2027 - Utah County Acad. of Scie...</div>
+                        </div>
+                        <div class="flex items-center gap-5 pt-3.5 mt-2 text-canvas-muted">
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Announcements">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+                            </button>
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Discussions">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                            </button>
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Assignments">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- CARD 3: English 11A Honors - Wishart -->
+                <article data-obstacle="true" class="canvas-card bg-white rounded-[4px] border border-[#c7cdd1] overflow-hidden flex flex-col">
+                    <!-- Banner: Stacked Vintage Green Books Illustration -->
+                    <div class="relative h-[142px] bg-[#2b6f56] flex items-center justify-center overflow-hidden border-b border-black/5">
+                        <svg class="w-full h-full" viewBox="0 0 280 142" fill="none">
+                            <rect width="280" height="142" fill="#2f765b"/>
+                            <!-- Bottom Book -->
+                            <g transform="rotate(-8 140 105)">
+                                <rect x="42" y="88" width="192" height="28" rx="4" fill="#1e533f" stroke="#143a2b" stroke-width="1.5"/>
+                                <rect x="52" y="92" width="174" height="20" rx="2" fill="#e5e2d5"/>
+                                <line x1="65" y1="88" x2="65" y2="116" stroke="#d4af37" stroke-width="2"/>
+                                <line x1="210" y1="88" x2="210" y2="116" stroke="#d4af37" stroke-width="2"/>
+                            </g>
+                            <!-- Middle Book -->
+                            <g transform="rotate(-11 140 75)">
+                                <rect x="46" y="58" width="186" height="27" rx="4" fill="#235e47" stroke="#143a2b" stroke-width="1.5"/>
+                                <rect x="56" y="62" width="168" height="19" rx="2" fill="#ebe8dc"/>
+                                <line x1="70" y1="58" x2="70" y2="85" stroke="#d4af37" stroke-width="2"/>
+                                <line x1="204" y1="58" x2="204" y2="85" stroke="#d4af37" stroke-width="2"/>
+                            </g>
+                            <!-- Top Book -->
+                            <g transform="rotate(-13 140 44)">
+                                <path d="M52 28 L225 22 L236 46 L60 52 Z" fill="#1b4d3a" stroke="#123628" stroke-width="1.5"/>
+                                <rect x="54" y="45" width="182" height="14" rx="2" fill="#25634b"/>
+                            </g>
+                        </svg>
+                        <button class="card-menu-btn absolute top-2.5 right-2.5 p-1 rounded-full hover:bg-black/15 text-white transition cursor-pointer" title="Card Options">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                        </button>
+                    </div>
+                    <!-- Card Body -->
+                    <div class="p-3.5 flex-1 flex flex-col justify-between">
+                        <div>
+                            <a href="#course-english" class="course-link block text-[13.5px] font-bold text-[#1c5c43] hover:underline truncate">
+                                English 11A Honors - Wishart - 2...
+                            </a>
+                            <div class="text-[12.5px] text-canvas-muted truncate mt-0.5">English 11A Honors - Wishart...</div>
+                            <div class="text-[11px] text-canvas-muted truncate mt-0.5">2026/2027 - Utah County Acad. of Scie...</div>
+                        </div>
+                        <div class="flex items-center gap-5 pt-3.5 mt-2 text-canvas-muted">
+                            <button class="relative hover:text-canvas-text transition cursor-pointer" title="5 Unread Announcements">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+                                <span class="absolute -top-2 -right-2.5 w-4 h-4 rounded-full bg-[#1c5c43] text-white text-[10px] font-bold flex items-center justify-center">5</span>
+                            </button>
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Assignments">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- CARD 4: Speech CE - Paz - 2027-S1 -->
+                <article data-obstacle="true" class="canvas-card bg-white rounded-[4px] border border-[#c7cdd1] overflow-hidden flex flex-col">
+                    <!-- Banner: Deep Navy THE ART OF PUBLIC SPEAKING -->
+                    <div class="relative h-[142px] bg-gradient-to-b from-[#1a4373] via-[#133258] to-[#0b1f38] flex flex-col items-center justify-between py-3 px-3 overflow-hidden border-b border-black/5">
+                        <span class="text-[9.5px] tracking-[0.16em] text-blue-200/80 font-semibold uppercase z-10">THE ART OF PUBLIC SPEAKING</span>
+                        <!-- Soundwave graphic -->
+                        <div class="flex items-center justify-center gap-1 h-14 w-full opacity-60">
+                            <span class="w-1 bg-blue-400/50 h-4 rounded-full"></span>
+                            <span class="w-1 bg-blue-300/70 h-8 rounded-full"></span>
+                            <span class="w-1 bg-sky-300/80 h-12 rounded-full"></span>
+                            <span class="w-1 bg-blue-400/60 h-6 rounded-full"></span>
+                            <span class="w-1 bg-indigo-300/90 h-14 rounded-full"></span>
+                            <span class="w-1 bg-blue-300/70 h-9 rounded-full"></span>
+                            <span class="w-1 bg-sky-400/80 h-11 rounded-full"></span>
+                            <span class="w-1 bg-blue-400/50 h-5 rounded-full"></span>
+                            <span class="w-1 bg-indigo-300/80 h-12 rounded-full"></span>
+                            <span class="w-1 bg-blue-300/60 h-7 rounded-full"></span>
+                            <span class="w-1 bg-sky-300/75 h-10 rounded-full"></span>
+                            <span class="w-1 bg-blue-400/50 h-4 rounded-full"></span>
+                        </div>
+                        <div class="h-1"></div>
+                        <button class="card-menu-btn absolute top-2.5 right-2.5 p-1 rounded-full hover:bg-black/20 text-white transition cursor-pointer" title="Card Options">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                        </button>
+                    </div>
+                    <!-- Card Body -->
+                    <div class="p-3.5 flex-1 flex flex-col justify-between">
+                        <div>
+                            <a href="#course-speech" class="course-link block text-[13.5px] font-bold text-[#14365d] hover:underline truncate">
+                                Speech CE - Paz - 2027-S1
+                            </a>
+                            <div class="text-[12.5px] text-canvas-muted truncate mt-0.5">Speech CE - Paz - 2027-S1</div>
+                            <div class="text-[11px] text-canvas-muted truncate mt-0.5">2026/2027 - Utah County Acad. of Scie...</div>
+                        </div>
+                        <div class="flex items-center gap-5 pt-3.5 mt-2 text-canvas-muted">
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Announcements">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+                            </button>
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Discussions">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- CARD 5: US National Government CE - Ferlo -->
+                <article data-obstacle="true" class="canvas-card bg-white rounded-[4px] border border-[#c7cdd1] overflow-hidden flex flex-col">
+                    <!-- Banner: US Flag & Capitol Dome with We the People -->
+                    <div class="relative h-[142px] bg-gradient-to-r from-[#1d4e89] via-[#2b6cb0] to-[#3182ce] flex items-center justify-between px-4 overflow-hidden border-b border-black/5">
+                        <!-- Subtle stripes background -->
+                        <div class="absolute inset-0 opacity-20" style="background: repeating-linear-gradient(0deg, #ffffff, #ffffff 8px, #b91c1c 8px, #b91c1c 16px);"></div>
+                        <!-- Left Constitution Parchment -->
+                        <div class="relative z-10 bg-[#f4ebd9]/90 px-2.5 py-2 rounded shadow-sm border border-amber-900/20 -rotate-2">
+                            <span class="font-serif italic font-bold text-[15px] text-[#2d2418]">We the People</span>
+                        </div>
+                        <!-- Right Capitol Dome Silhouette -->
+                        <svg class="relative z-10 w-24 h-28 text-white/85 drop-shadow" viewBox="0 0 100 110" fill="currentColor">
+                            <rect x="48" y="8" width="4" height="10"/>
+                            <path d="M42 24 C42 17, 58 17, 58 24 Z"/>
+                            <rect x="40" y="24" width="20" height="8"/>
+                            <path d="M28 52 C28 32, 72 32, 72 52 Z"/>
+                            <rect x="24" y="52" width="52" height="14"/>
+                            <rect x="10" y="66" width="80" height="34"/>
+                            <rect x="20" y="72" width="60" height="28" fill="#1e40af" opacity="0.25"/>
+                        </svg>
+                        <button class="card-menu-btn absolute top-2.5 right-2.5 p-1 rounded-full hover:bg-black/20 text-white transition cursor-pointer z-20" title="Card Options">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                        </button>
+                    </div>
+                    <!-- Card Body -->
+                    <div class="p-3.5 flex-1 flex flex-col justify-between">
+                        <div>
+                            <a href="#course-gov" class="course-link block text-[13.5px] font-bold text-[#1a5296] hover:underline truncate">
+                                US National Government CE - Fer...
+                            </a>
+                            <div class="text-[12.5px] text-canvas-muted truncate mt-0.5">US National Government CE ...</div>
+                            <div class="text-[11px] text-canvas-muted truncate mt-0.5">2026/2027 - Utah County Acad. of Scie...</div>
+                        </div>
+                        <div class="flex items-center gap-5 pt-3.5 mt-2 text-canvas-muted">
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Assignments">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                            </button>
+                            <button class="relative hover:text-canvas-text transition cursor-pointer" title="1 Unread Announcement">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+                                <span class="absolute -top-2 -right-2.5 w-4 h-4 rounded-full bg-[#1c5c43] text-white text-[10px] font-bold flex items-center justify-center">1</span>
+                            </button>
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Discussions">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                            </button>
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Files">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- CARD 6: Web Development II CE - Clark -->
+                <article data-obstacle="true" class="canvas-card bg-white rounded-[4px] border border-[#c7cdd1] overflow-hidden flex flex-col">
+                    <!-- Banner: UTAH VALLEY UVU UNIVERSITY -->
+                    <div class="relative h-[142px] bg-[#7c8a7e] flex flex-col items-center justify-center px-4 overflow-hidden border-b border-black/5">
+                        <!-- Subtle architectural grid lines -->
+                        <div class="w-full border-y border-[#4a5a4d]/50 py-2 text-center">
+                            <div class="text-[11px] font-bold tracking-[0.22em] text-[#3c4b3f]">UTAH VALLEY</div>
+                            <div class="text-[36px] font-black leading-none tracking-tight text-[#435446] my-0.5">UVU</div>
+                            <div class="text-[11px] font-bold tracking-[0.24em] text-[#3c4b3f]">UNIVERSITY</div>
+                        </div>
+                        <button class="card-menu-btn absolute top-2.5 right-2.5 p-1 rounded-full hover:bg-black/15 text-white transition cursor-pointer" title="Card Options">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                        </button>
+                    </div>
+                    <!-- Card Body -->
+                    <div class="p-3.5 flex-1 flex flex-col justify-between">
+                        <div>
+                            <a href="#course-webdev" class="course-link block text-[13.5px] font-bold text-[#394b59] hover:underline truncate">
+                                Web Development II CE - Clark - ...
+                            </a>
+                            <div class="text-[12.5px] text-canvas-muted truncate mt-0.5">Web Development II CE - Cla...</div>
+                            <div class="text-[11px] text-canvas-muted truncate mt-0.5">2026/2027 - Utah County Acad. of Scie...</div>
+                        </div>
+                        <div class="flex items-center gap-5 pt-3.5 mt-2 text-canvas-muted">
+                            <button class="hover:text-canvas-text transition cursor-pointer" title="Announcements">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </article>
+
+            </section>
+        </div>
+    </main>
+
+    <!-- =====================================================================
+         3. RIGHT SIDEBAR (280px wide: UCAS Logo + To Do + Recent Feedback)
+         ===================================================================== -->
+    <aside id="right-sidebar" class="w-full lg:w-[290px] bg-white px-5 pt-4 pb-10 shrink-0 border-t lg:border-t-0 border-[#e2e6ea]">
+        
+        <!-- Top Right Institutional Header with SECRET TRIGGER BUTTON -->
+        <div class="flex flex-col items-center justify-center mb-5 pt-1">
+            <div class="relative inline-flex flex-col items-center">
+                <span class="pointer-events-none text-[7px] font-bold tracking-[0.06em] text-canvas-ucasGreen uppercase leading-none mb-0.5">UTAH COUNTY ACADEMY OF SCIENCES</span>
+                <div class="flex items-center font-black text-[42px] leading-[0.88] tracking-[-2px] text-canvas-ucasGreen">
+                    <span class="pointer-events-none">UC</span>
+                    <!-- Stylized 'A' with Secret Clickable Starburst/Atom Icon inside -->
+                    <span class="relative inline-flex items-center justify-center">
+                        <span class="pointer-events-none">A</span>
+                        <button id="secret-ucas-trigger" type="button" title="Launch UI Tag (or press `)" aria-label="UCAS Emblem" class="secret-atom absolute bottom-[2px] z-30 w-6 h-6 rounded-full bg-white/95 flex items-center justify-center text-canvas-ucasGreen focus:outline-none cursor-pointer">
+                            <svg class="pointer-events-none w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 1L14.6 8.8L22.5 9.5L16.3 14.6L18.2 22.3L12 18.1L5.8 22.3L7.7 14.6L1.5 9.5L9.4 8.8L12 1Z"/>
+                            </svg>
+                        </button>
+                    </span>
+                    <span class="pointer-events-none">S</span>
+                </div>
+                <span class="pointer-events-none text-[6.8px] font-bold tracking-[0.05em] text-canvas-text uppercase mt-1">STEM EARLY COLLEGE HIGH SCHOOL</span>
+            </div>
+        </div>
+
+        <!-- TO DO SECTION -->
+        <div class="mb-6">
+            <h2 class="text-[15px] font-bold text-canvas-text pb-2 border-b border-[#c7cdd1]">To Do</h2>
+            
+            <ul id="todo-list" class="divide-y divide-transparent mt-2 space-y-2.5">
+                <!-- Item 1 -->
+                <li data-obstacle="true" class="todo-item flex items-start justify-between gap-2 py-1 group rounded hover:bg-gray-50/80 px-1 -mx-1 transition">
+                    <div class="flex items-start gap-2.5 min-w-0">
+                        <!-- Megaphone Icon -->
+                        <svg class="w-4 h-4 text-canvas-muted shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+                        <div class="min-w-0 text-[12px] leading-snug">
+                            <a href="#todo-1" class="todo-link block font-bold text-[#1c5c43] hover:underline truncate">9 November Week's Ag...</a>
+                            <div class="text-canvas-muted truncate">English 11A Honors -</div>
+                            <div class="text-canvas-muted truncate">Wishart - 2027-S1</div>
+                            <div class="text-[11px] text-canvas-muted">Nov 9 at 12:22pm</div>
+                        </div>
+                    </div>
+                    <button class="dismiss-todo text-canvas-text hover:text-black font-bold text-sm leading-none px-1 cursor-pointer" title="Ignore">×</button>
+                </li>
+
+                <!-- Item 2 -->
+                <li data-obstacle="true" class="todo-item flex items-start justify-between gap-2 py-1 group rounded hover:bg-gray-50/80 px-1 -mx-1 transition">
+                    <div class="flex items-start gap-2.5 min-w-0">
+                        <!-- Assignment Icon -->
+                        <svg class="w-4 h-4 text-canvas-muted shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        <div class="min-w-0 text-[12px] leading-snug">
+                            <a href="#todo-2" class="todo-link block font-bold text-[#1c5c43] hover:underline truncate">Ch 7-12 Class Notes</a>
+                            <div class="text-canvas-muted truncate">Speech CE - Paz - 2027-</div>
+                            <div class="text-canvas-muted truncate">S1</div>
+                            <div class="text-[11px] text-canvas-muted">35 points &nbsp;|&nbsp;</div>
+                            <div class="text-[11px] text-canvas-muted">Nov 9 at 11:59pm</div>
+                        </div>
+                    </div>
+                    <button class="dismiss-todo text-canvas-text hover:text-black font-bold text-sm leading-none px-1 cursor-pointer" title="Ignore">×</button>
+                </li>
+
+                <!-- Item 3 -->
+                <li data-obstacle="true" class="todo-item flex items-start justify-between gap-2 py-1 group rounded hover:bg-gray-50/80 px-1 -mx-1 transition">
+                    <div class="flex items-start gap-2.5 min-w-0">
+                        <svg class="w-4 h-4 text-canvas-muted shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        <div class="min-w-0 text-[12px] leading-snug">
+                            <a href="#todo-3" class="todo-link block font-bold text-[#1c5c43] hover:underline truncate">Team Precis: American...</a>
+                            <div class="text-canvas-muted truncate">English 11A Honors -</div>
+                            <div class="text-canvas-muted truncate">Wishart - 2027-S1</div>
+                            <div class="text-[11px] text-canvas-muted">5 points &nbsp;|&nbsp;</div>
+                            <div class="text-[11px] text-canvas-muted">Nov 10 at 11:59pm</div>
+                        </div>
+                    </div>
+                    <button class="dismiss-todo text-canvas-text hover:text-black font-bold text-sm leading-none px-1 cursor-pointer" title="Ignore">×</button>
+                </li>
+
+                <!-- Item 4 -->
+                <li data-obstacle="true" class="todo-item flex items-start justify-between gap-2 py-1 group rounded hover:bg-gray-50/80 px-1 -mx-1 transition">
+                    <div class="flex items-start gap-2.5 min-w-0">
+                        <svg class="w-4 h-4 text-canvas-muted shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        <div class="min-w-0 text-[12px] leading-snug">
+                            <a href="#todo-4" class="todo-link block font-bold text-[#1c5c43] hover:underline truncate">Informative Preparatio...</a>
+                            <div class="text-canvas-muted truncate">Speech CE - Paz - 2027-</div>
+                            <div class="text-canvas-muted truncate">S1</div>
+                            <div class="text-[11px] text-canvas-muted">5 points &nbsp;|&nbsp;</div>
+                            <div class="text-[11px] text-canvas-muted">Nov 13 at 11:58pm</div>
+                        </div>
+                    </div>
+                    <button class="dismiss-todo text-canvas-text hover:text-black font-bold text-sm leading-none px-1 cursor-pointer" title="Ignore">×</button>
+                </li>
+
+                <!-- Item 5 -->
+                <li data-obstacle="true" class="todo-item flex items-start justify-between gap-2 py-1 group rounded hover:bg-gray-50/80 px-1 -mx-1 transition">
+                    <div class="flex items-start gap-2.5 min-w-0">
+                        <svg class="w-4 h-4 text-canvas-muted shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        <div class="min-w-0 text-[12px] leading-snug">
+                            <a href="#todo-5" class="todo-link block font-bold text-[#1c5c43] hover:underline truncate">TED Talk Speech prepar...</a>
+                            <div class="text-canvas-muted truncate">Speech CE - Paz - 2027-</div>
+                            <div class="text-canvas-muted truncate">S1</div>
+                            <div class="text-[11px] text-canvas-muted">5 points &nbsp;|&nbsp;</div>
+                            <div class="text-[11px] text-canvas-muted">Nov 13 at 11:59pm</div>
+                        </div>
+                    </div>
+                    <button class="dismiss-todo text-canvas-text hover:text-black font-bold text-sm leading-none px-1 cursor-pointer" title="Ignore">×</button>
+                </li>
+
+                <!-- Item 6 -->
+                <li data-obstacle="true" class="todo-item flex items-start justify-between gap-2 py-1 group rounded hover:bg-gray-50/80 px-1 -mx-1 transition">
+                    <div class="flex items-start gap-2.5 min-w-0">
+                        <svg class="w-4 h-4 text-canvas-muted shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        <div class="min-w-0 text-[12px] leading-snug">
+                            <a href="#todo-6" class="todo-link block font-bold text-[#1c5c43] hover:underline truncate">The Crucible Extra Cre...</a>
+                            <div class="text-canvas-muted truncate">English 11A Honors -</div>
+                            <div class="text-canvas-muted truncate">Wishart - 2027-S1</div>
+                            <div class="text-[11px] text-canvas-muted">1 points &nbsp;|&nbsp; Closed</div>
+                        </div>
+                    </div>
+                    <button class="dismiss-todo text-canvas-text hover:text-black font-bold text-sm leading-none px-1 cursor-pointer" title="Ignore">×</button>
+                </li>
+
+                <!-- Item 7 -->
+                <li data-obstacle="true" class="todo-item flex items-start justify-between gap-2 py-1 group rounded hover:bg-gray-50/80 px-1 -mx-1 transition">
+                    <div class="flex items-start gap-2.5 min-w-0">
+                        <!-- Quiz Rocket Icon -->
+                        <svg class="w-4 h-4 text-canvas-muted shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.59 14.37a6 6 0 01-5.84 7.38v-4.8m5.84-2.58a14.98 14.98 0 006.16-12.12A14.98 14.98 0 009.631 8.41m5.96 5.96a14.926 14.926 0 01-5.841 2.58m-.119-8.54a6 6 0 00-7.381 5.84h4.8m2.581-5.84a14.927 14.927 0 00-2.58 5.84m2.699 2.7c-.103.021-.207.041-.311.06a15.09 15.09 0 01-2.448-2.448 14.9 14.9 0 01.06-.312m-2.24 2.39a4.493 4.493 0 00-1.757 4.306 4.493 4.493 0 004.306-1.758M16.5 9a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"/></svg>
+                        <div class="min-w-0 text-[12px] leading-snug">
+                            <a href="#todo-7" class="todo-link block font-bold text-[#1c5c43] hover:underline truncate">Week 14 Weekly Quiz</a>
+                            <div class="text-canvas-muted truncate">US National Government</div>
+                            <div class="text-canvas-muted truncate">CE - Ferlo - 2027-S1</div>
+                            <div class="text-[11px] text-canvas-muted">13 points &nbsp;|&nbsp;</div>
+                            <div class="text-[11px] text-canvas-muted">Nov 13 at 11:59pm</div>
+                        </div>
+                    </div>
+                    <button class="dismiss-todo text-canvas-text hover:text-black font-bold text-sm leading-none px-1 cursor-pointer" title="Ignore">×</button>
+                </li>
+            </ul>
+
+            <div class="mt-3 text-center">
+                <button id="show-all-todos-btn" class="text-[12.5px] font-bold text-[#1c5c43] hover:underline cursor-pointer">
+                    Show All
+                </button>
+            </div>
+        </div>
+
+        <!-- RECENT FEEDBACK SECTION -->
+        <div>
+            <h2 class="text-[15px] font-bold text-canvas-text pb-2 border-b border-[#c7cdd1]">Recent Feedback</h2>
+            <div data-obstacle="true" class="mt-2.5 flex items-start gap-2.5 py-1">
+                <svg class="w-4 h-4 text-[#1c5c43] shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                    <polyline points="20 6 9 17 4 12"/>
+                </svg>
+                <div class="text-[12px] leading-snug">
+                    <a href="#feedback-poems" class="feedback-link block font-bold text-[#1c5c43] hover:underline">5 Poems</a>
+                    <div class="text-canvas-muted">Speech CE - Paz - 2027-S1</div>
+                </div>
+            </div>
+        </div>
+
+    </aside>
+    </div><!-- /page-root -->
+
+    <!-- Subtle Canvas Notification Toast -->
+    <div id="canvas-toast" class="fixed top-4 right-4 z-[9995] px-4 py-2.5 rounded-[4px] bg-[#2d3b45] text-white text-[13px] shadow-lg opacity-0 pointer-events-none transition-opacity duration-200">
+        Action completed
+    </div>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>

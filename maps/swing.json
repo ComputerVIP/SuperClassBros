@@ -1,0 +1,18 @@
+{
+  "format": "super-class-bros-level",
+  "version": 1,
+  "name": "Swing",
+  "size": [1440, 810],
+  "spawn": {"x":20,"y":500},
+  "cards": [
+    {"x":10,"y":500,"w":160,"h":120,"dim":"both"},
+    {"x":1270,"y":490,"w":160,"h":120,"dim":"both"},
+    {"x":610,"y":150,"w":160,"h":120,"dim":"both"}
+  ],
+  "ledges": [],
+  "springs": [],
+  "flags": [
+    {"x":1420,"y":490}
+  ],
+  "pickups": []
+}

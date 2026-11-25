@@ -1,5 +1,5 @@
 // ONLINE: networking (MQTT relay, WebRTC mesh, other tabs), lobby discovery, and player snapshots.
-import { G, local, canvas, makeRunner, roomKey, playerName, ATTACK_DURATION, ATTACK_DAMAGE } from './engine.js';
+import { G, local, view, makeRunner, roomKey, playerName, MODES, DEV } from './engine.js';
 
 // ===========================================================================
 // NETWORK TRANSPORTS & LOBBIES
@@ -16,12 +16,12 @@ const BROKERS = [
     'wss://broker.hivemq.com:8884/mqtt',
     'wss://test.mosquitto.org:8081/mqtt',
 ];
-const LOBBY_TOPIC = 'ucas/canvas/ui-tag/v3/lobbies';
+const LOBBY_TOPIC = 'ucas/canvas/ui-tag/v4/lobbies';
 const PEER_CONFIG = {
     debug: 0,
     config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] },
 };
-const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('canvas_ui_tag_p2p_v3') : null;
+const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('canvas_ui_tag_p2p_v4') : null;
 
 /** Callbacks set by game.js */
 export const hooks = {
@@ -49,7 +49,7 @@ function stopRelay() {
 function startRelay() {
     stopRelay();
     if (typeof mqtt === 'undefined') return;
-    roomTopic = `ucas/canvas/ui-tag/v3/room/${roomKey()}`;
+    roomTopic = `ucas/canvas/ui-tag/v4/room/${roomKey()}`;
     hooks.status('connecting', 'Connecting cross-device relay...');
     try {
         const client = mqtt.connect(BROKERS[brokerIndex % BROKERS.length], {
@@ -145,7 +145,7 @@ function wireConnection(conn) {
 function startMesh() {
     stopMesh();
     if (typeof Peer === 'undefined') return;
-    const hostId = `ucas-canvas-tag-host-${roomKey()}`;
+    const hostId = `ucas-canvas-tag4-host-${roomKey()}`;
     const candidate = new Peer(hostId, PEER_CONFIG);
     peer = candidate;
     candidate.on('open', () => { isHost = true; });
@@ -198,7 +198,7 @@ if (channel) {
 // Lobby discovery: who is in which room, across devices
 // ---------------------------------------------------------------------------
 const lobbies = new Map(); // key -> { key, room, mode, players: Map(id -> {name, color, updatedAt}) }
-const DEFAULT_ROOMS = [['tag', 'UCAS-1'], ['fight', 'UCAS-1']];
+const DEFAULT_ROOMS = [['tag', 'UCAS-1']];
 
 function ensureLobby(mode, room) {
     const key = `${mode}-${room}`.toLowerCase();
@@ -208,7 +208,7 @@ function ensureLobby(mode, room) {
 
 function handleLobbyPulse(msg) {
     if (!msg || msg.type !== 'lobby-pulse' || !msg.room || !msg.playerId) return;
-    ensureLobby(msg.mode === 'fight' ? 'fight' : 'tag', String(msg.room).toUpperCase()).players.set(msg.playerId, {
+    ensureLobby(MODES[msg.mode] ? msg.mode : 'tag', String(msg.room).toUpperCase()).players.set(msg.playerId, {
         name: msg.playerName || 'Runner',
         color: msg.bodyColor || '#2563eb',
         updatedAt: Date.now(),
@@ -237,7 +237,7 @@ export function getLobbies() {
         const keep = DEFAULT_ROOMS.some(([m, r]) => `${m}-${r}`.toLowerCase() === key) || key === roomKey();
         if (!lobby.players.size && !keep) lobbies.delete(key);
     }
-    return [...lobbies.values()].sort((a, b) =>
+    return [...lobbies.values()].filter((l) => !MODES[l.mode].dev || DEV).sort((a, b) =>
         (b.key === roomKey()) - (a.key === roomKey()) || b.players.size - a.players.size);
 }
 
@@ -245,17 +245,24 @@ export function getLobbies() {
 // PLAYER SNAPSHOTS
 // ===========================================================================
 // Turning our runner into network snapshots, and remote snapshots into smooth puppets.
-// Positions travel as fractions of the screen so players with different window sizes line up.
 
 const STALE_MS = 12000;
 
+// Positions are shared in the game's design space (see `view` in engine.js): x as a fraction of the
+// width, y as the height of the feet above the bottom of the screen. That keeps everyone's speed and
+// floor level identical whatever their window size or browser zoom.
+const toShared = (x, y) => ({ nx: +(x / view.w).toFixed(4), by: +(view.h - y).toFixed(1) });
+const fromShared = (nx, by) => ({ x: (nx ?? 0.3) * view.w, y: view.h - (by ?? 20) });
+
 export function buildPayload() {
     const g = local.grapple;
+    const pos = toShared(local.x, local.y + local.h);
+    const anchor = g.active ? toShared(g.ax, g.ay) : { nx: 0, by: 0 };
     return {
         id: G.playerId,
         room: roomKey(),
-        nx: +(local.x / canvas.width).toFixed(4),
-        ny: +(local.y / canvas.height).toFixed(4),
+        nx: pos.nx,
+        by: pos.by,
         vx: Math.round(local.vx),
         vy: Math.round(local.vy),
         facing: local.facing,
@@ -263,20 +270,15 @@ export function buildPayload() {
         isIt: local.isIt,
         itChangedAt: local.itChangedAt,
         tagsScored: local.tagsScored,
-        kos: local.kos,
-        health: local.health,
-        comboCount: local.comboCount,
-        blocking: local.blocking,
-        attackKind: local.attackKind,
-        attackDamage: local.attackDamage,
-        attackActive: local.attackTimer > 0,
+        frozen: local.frozen,
+        out: local.out,
         bodyColor: local.bodyColor,
         scarfColor: local.scarfColor,
         hatColor: local.hatColor,
         label: playerName(),
         grappleActive: g.active,
-        gax: g.active ? +(g.ax / canvas.width).toFixed(4) : 0,
-        gay: g.active ? +(g.ay / canvas.height).toFixed(4) : 0,
+        gax: anchor.nx,
+        gby: anchor.by,
         updatedAt: Date.now(),
     };
 }
@@ -291,24 +293,22 @@ function copyFields(rp, d) {
         facing: d.facing || 1,
         grounded: !!d.grounded,
         isIt: !!d.isIt,
+        itSince: d.isIt && !rp.isIt ? G.clock : rp.itSince, // when we first saw them become IT (for the fuse display)
         itChangedAt: d.itChangedAt || 0,
         tagsScored: d.tagsScored || 0,
-        kos: d.kos ?? rp.kos,
-        health: d.health ?? rp.health,
-        comboCount: d.comboCount || 0,
-        blocking: !!d.blocking,
-        attackKind: d.attackKind || 'light',
-        attackDamage: d.attackDamage || ATTACK_DAMAGE,
+        frozen: !!d.frozen,
+        frozenAt: d.frozen ? (rp.frozenAt || Date.now()) : 0,
+        out: !!d.out,
         bodyColor: d.bodyColor || rp.bodyColor,
         scarfColor: d.scarfColor || rp.scarfColor,
         hatColor: d.hatColor || rp.hatColor,
         label: d.label || rp.label,
         lastSeen: Date.now(),
     });
-    if (d.attackActive) rp.attackTimer = ATTACK_DURATION;
+    const a = fromShared(d.gax, d.gby);
     rp.grapple.active = !!d.grappleActive;
-    rp.grapple.ax = (d.gax || 0) * canvas.width;
-    rp.grapple.ay = (d.gay || 0) * canvas.height;
+    rp.grapple.ax = a.x;
+    rp.grapple.ay = a.y;
 }
 
 /** Returns true if this snapshot created a new remote player. */
@@ -318,18 +318,19 @@ export function applyPayload(d) {
         G.remotes.delete(d.id);
         return false;
     }
-    const px = (d.nx ?? 0.3) * canvas.width;
-    const py = (d.ny ?? 0.1) * canvas.height;
+    const feet = fromShared(d.nx, d.by);
     let rp = G.remotes.get(d.id);
     const isNew = !rp;
     if (isNew) {
-        rp = makeRunner(d.id, { x: px, y: py, targetX: px, targetY: py, label: d.label || 'Runner', bodyColor: '#e11d48', scarfColor: '#fb7185', hatColor: '#be123c' });
+        rp = makeRunner(d.id, { label: d.label || 'Runner', bodyColor: '#e11d48', scarfColor: '#fb7185', hatColor: '#be123c' });
         G.remotes.set(d.id, rp);
         hooks.toast(`${rp.label} joined ${G.room}!`);
     }
+    const y = Math.max(0, feet.y - rp.h);
+    if (isNew) { rp.x = feet.x; rp.y = y; }
     copyFields(rp, d);
-    rp.targetX = px;
-    rp.targetY = py;
+    rp.targetX = feet.x;
+    rp.targetY = y;
     hooks.count();
     return isNew;
 }
@@ -343,8 +344,6 @@ export function stepRemotes(dt) {
             hooks.count();
             continue;
         }
-        if (rp.attackTimer > 0) rp.attackTimer -= dt;
-        if (rp.hitFlashTimer > 0) rp.hitFlashTimer -= dt;
         rp.targetX += rp.vx * dt * 0.35;
         rp.targetY += rp.vy * dt * 0.35;
         const k = Math.min(1, dt * 16);

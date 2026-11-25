@@ -40,95 +40,166 @@
     <!-- SECRET GAME OVERLAY CANVAS -->
     <canvas id="ui-tag-canvas"></canvas>
 
-    <!-- GAME MENU PILL (hidden until the secret button is clicked; can be collapsed with the "–" button or H) -->
-    <div id="game-hud" data-mode="tag" class="hud-pill hidden-hud fixed bottom-4 left-1/2 z-[9999] flex flex-wrap items-center justify-center gap-2 sm:gap-2.5 px-3.5 py-2 rounded-full bg-[#1f2937]/95 text-white shadow-2xl border border-slate-600/70 backdrop-blur-md text-xs max-w-[96vw]">
+    <!-- GAME MENU: a small bar in the bottom-left corner. "⋯" opens the controls, "–" hides it (or press H). -->
+    <div id="game-hud" data-mode="tag" class="hud-pill hidden-hud fixed bottom-3 left-3 z-[9999] w-max max-w-[calc(100vw-1.5rem)] rounded-2xl bg-[#1f2937]/90 text-white shadow-xl border border-slate-600/70 backdrop-blur-md text-xs">
 
-        <!-- Local player: status + customization -->
-        <div id="hud-p1" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-600/30 border border-blue-400/40 transition-all">
-            <span id="p1-color-dot" class="w-2.5 h-2.5 rounded-sm bg-blue-400 inline-block"></span>
-            <span id="p1-label" class="font-bold text-blue-200 max-w-[92px] truncate">Runner</span>
-            <span id="p1-health-label" class="fight-only font-mono text-[10px] text-emerald-300" title="Health">HP 100</span>
-            <span id="p1-combo-label" class="fight-only hidden font-black text-[10px] text-fuchsia-300" title="Combo">COMBO 0</span>
-            <button id="toggle-customizer-btn" title="Customize Name & Color" class="px-1.5 py-0.5 rounded bg-slate-700/90 hover:bg-slate-600 text-[10px] text-slate-200 font-semibold transition cursor-pointer">Style</button>
-            <span class="tag-only text-[10px] text-blue-300/90 hidden xl:inline">WASD · <b class="text-white">E</b> Swing · <b class="text-white">Shift</b> Dash · <b class="text-white">S</b> Slam</span>
-            <span class="fight-only text-[10px] text-blue-300/90 hidden xl:inline">WASD · <b class="text-white">E</b> Swing · <b class="text-white">Shift</b> Dash · <b class="text-white">J</b> Combo · <b class="text-white">K</b> Heavy · <b class="text-white">L</b> Guard · <b class="text-white">S</b> Slam</span>
-            <span id="p1-it-tag" class="tag-only hidden px-1.5 rounded bg-amber-400 text-slate-950 font-black text-[10px] tracking-wide">IT!</span>
-            <span id="p1-score" class="ml-1 font-mono font-bold text-white" title="Tags Landed">0</span>
+        <!-- Controls (closed until "⋯" is clicked) -->
+        <div id="hud-panel" class="hidden w-[310px] max-w-full space-y-2 px-3 pt-3 pb-2.5 border-b border-slate-700">
+            <div class="flex items-center gap-1.5">
+                <span class="text-[10px] text-slate-400">Room</span>
+                <input id="room-code-input" type="text" maxlength="12" value="UCAS-1" title="Type any room code and press Enter" class="w-[72px] bg-slate-900/90 text-emerald-300 font-mono font-bold text-[11px] px-1.5 py-0.5 rounded border border-slate-600 focus:outline-none focus:border-emerald-400 uppercase" />
+                <select id="mode-select" title="Server type" class="w-[78px] bg-slate-900/90 text-amber-200 font-bold text-[11px] px-1 py-0.5 rounded border border-slate-600 focus:outline-none focus:border-amber-400 cursor-pointer">
+                    <option value="tag">Tag</option>
+                    <option value="infection" hidden disabled>Infection</option>
+                    <option value="freeze" hidden disabled>Freeze Tag</option>
+                    <option value="potato" hidden disabled>Hot Potato</option>
+                    <option value="platformer" disabled>Platformer, IN PROGRESS</option>
+                </select>
+                <button id="toggle-lobby-btn" title="Browse and join active rooms" class="px-2 py-0.5 rounded bg-emerald-600/80 hover:bg-emerald-500 text-[10px] text-white font-bold transition cursor-pointer flex items-center gap-1">
+                    <span>Lobby</span>
+                    <span id="lobby-rooms-count" class="px-1 rounded-full bg-black/30 text-[9px]">1</span>
+                </button>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-1.5">
+                <button id="chat-toggle-btn" title="Open / close chat" class="relative px-2.5 py-1 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-[11px] font-semibold text-cyan-300 transition cursor-pointer">
+                    Chat
+                    <span id="chat-unread" class="hidden absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-rose-500"></span>
+                </button>
+                <button id="toggle-customizer-btn" title="Name and color" class="px-2.5 py-1 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-[11px] font-semibold text-slate-200 transition cursor-pointer">Style</button>
+                <button id="respawn-btn" title="Respawn" class="px-2.5 py-1 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-[11px] font-semibold text-slate-200 transition cursor-pointer">Respawn</button>
+                <button id="toggle-bot-btn" class="tag-only px-2.5 py-1 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-[11px] font-semibold text-emerald-300 transition cursor-pointer flex items-center gap-1.5">
+                    <span id="bot-indicator" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                    <span id="bot-btn-text">Bot: ON</span>
+                </button>
+                <!-- Normal tag, or the bot is always IT so you can practice running -->
+                <button id="bot-role-btn" class="tag-only classic-only px-2.5 py-1 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-[11px] font-semibold text-slate-300 transition cursor-pointer">Bot: Normal</button>
+                <label class="tag-only flex items-center gap-1 text-[10px] text-slate-300" title="How good the practice bots are">Bots
+                    <select id="bot-level-select" class="bg-slate-900 text-emerald-200 font-bold text-[11px] px-1 py-0.5 rounded-full border border-slate-600 focus:outline-none cursor-pointer">
+                        <option value="easy">Easy</option>
+                        <option value="normal" selected>Normal</option>
+                        <option value="hard">Hard</option>
+                        <option value="mixed">Mixed</option>
+                    </select>
+                </label>
+            </div>
+
+            <!-- Developer tools: only appears with developer mode on (add ?dev=1 to the link) -->
+            <div id="dev-panel" class="hidden space-y-1.5 rounded-lg bg-slate-900/70 border border-amber-500/40 p-2">
+                <div class="flex items-center justify-between gap-2">
+                    <span class="font-bold text-amber-300 text-[11px]">Developer</span>
+                    <span class="flex gap-1">
+                        <button id="dev-copy-btn" title="Copy changed values to the clipboard" class="px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-[10px] text-slate-200 cursor-pointer">Copy tuning</button>
+                        <button id="dev-reset-btn" class="px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-[10px] text-slate-200 cursor-pointer">Reset</button>
+                    </span>
+                </div>
+                <button id="dev-editor-btn" class="w-full px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-[11px] font-bold text-white cursor-pointer">Open level editor (Platformer)</button>
+                <div id="dev-bots" class="flex items-center gap-1.5"></div>
+                <div id="dev-lab" class="space-y-1 border-b border-amber-500/30 pb-1.5"></div>
+                <div id="dev-toggles" class="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-200"></div>
+                <div id="dev-sliders" class="space-y-0.5 max-h-40 overflow-y-auto pr-1"></div>
+            </div>
+
+            <p class="text-[10px] text-slate-400 leading-snug">
+                <b class="text-slate-200">WASD</b> move · <b class="text-slate-200">W/Space</b> jump · <b class="text-slate-200">E</b> grapple · <b class="text-slate-200">Shift</b> dash · <b class="text-slate-200">S</b> drop/dive · <b class="text-slate-200">H</b> hide menu
+            </p>
         </div>
 
-        <!-- Room, server type and lobby browser -->
-        <div id="hud-room-box" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/90 border border-slate-600">
+        <!-- Always-visible bar -->
+        <div class="flex items-center gap-2 px-2.5 py-1.5">
+            <div id="hud-p1" class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-600/30 border border-blue-400/40 transition-all">
+                <span id="p1-color-dot" class="w-2.5 h-2.5 rounded-sm bg-blue-400 inline-block"></span>
+                <span id="p1-label" class="font-bold text-blue-200 max-w-[90px] truncate">Runner</span>
+                <span id="p1-it-tag" class="tag-only hidden px-1.5 rounded bg-amber-400 text-slate-950 font-black text-[10px] tracking-wide">IT!</span>
+                <span id="p1-score" class="tag-only font-mono font-bold text-white" title="Tags landed">0</span>
+            </div>
             <span id="net-status-dot" class="w-2 h-2 rounded-full bg-amber-400 animate-pulse" title="Connecting..."></span>
-            <span class="text-[10px] text-slate-400">Room:</span>
-            <input id="room-code-input" type="text" maxlength="12" value="UCAS-1" title="Type any room code and press Enter" class="w-16 bg-slate-900/90 text-emerald-300 font-mono font-bold text-[11px] px-1.5 py-0.5 rounded border border-slate-600 focus:outline-none focus:border-emerald-400 uppercase" />
-            <select id="mode-select" title="Server type" class="w-[68px] bg-slate-900/90 text-amber-200 font-bold text-[11px] px-1 py-0.5 rounded border border-slate-600 focus:outline-none focus:border-amber-400 cursor-pointer">
-                <option value="tag">Tag</option>
-                <option value="fight">Fight</option>
-                <option value="platformer" disabled>Platformer, IN PROGRESS</option>
-            </select>
-            <button id="toggle-lobby-btn" title="Browse & Join Active Rooms" class="px-2 py-0.5 rounded bg-emerald-600/80 hover:bg-emerald-500 text-[10px] text-white font-bold transition cursor-pointer flex items-center gap-1">
-                <span>Lobby</span>
-                <span id="lobby-rooms-count" class="px-1 rounded-full bg-black/30 text-[9px]">2</span>
+            <span id="player-count-badge" class="font-mono text-[10px] text-emerald-300" title="Players in this room">1 online</span>
+            <button id="hud-more-btn" title="Menu" class="relative w-6 h-6 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold leading-none flex items-center justify-center transition cursor-pointer">⋯
+                <span id="more-unread" class="hidden absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-rose-500"></span>
             </button>
-            <span id="player-count-badge" class="px-1.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 font-bold text-[10px]" title="Connected Players in Room">1 Online</span>
+            <button id="hide-menu-btn" title="Hide menu (H)" class="w-6 h-6 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold flex items-center justify-center transition cursor-pointer">–</button>
+            <button id="exit-game-btn" title="Exit game" class="w-6 h-6 rounded-full bg-rose-500/80 hover:bg-rose-500 text-white font-bold flex items-center justify-center transition cursor-pointer">×</button>
         </div>
-
-        <!-- Chat toggle -->
-        <button id="chat-toggle-btn" title="Open / close chat" class="relative px-2.5 py-1 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-[11px] font-semibold text-cyan-300 transition cursor-pointer">
-            Chat
-            <span id="chat-unread" class="hidden absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-rose-500"></span>
-        </button>
-
-        <!-- Bot toggle -->
-        <button id="toggle-bot-btn" class="px-2.5 py-1 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-[11px] font-semibold text-emerald-300 transition cursor-pointer flex items-center gap-1.5">
-            <span id="bot-indicator" class="w-2 h-2 rounded-full bg-emerald-400"></span>
-            <span id="bot-btn-text">Bot: ON</span>
-        </button>
-
-        <!-- Bot role (Tag only): normal, or always IT for running practice -->
-        <button id="bot-role-btn" class="tag-only px-2.5 py-1 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-[11px] font-semibold text-slate-300 transition cursor-pointer">Bot: Normal</button>
-
-        <!-- Follow camera (Fight only) -->
-        <button id="cam-toggle-btn" title="Follow camera: slight zoom that gently tracks you" class="fight-only px-2.5 py-1 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-[11px] font-semibold text-slate-300 transition cursor-pointer">Cam: OFF</button>
-
-        <!-- Respawn -->
-        <button id="respawn-btn" title="Respawn Runner" class="p-1.5 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-200 transition cursor-pointer">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-        </button>
-
-        <!-- Hide menu (press H or click the tab to bring it back) -->
-        <button id="hide-menu-btn" title="Hide menu (H)" class="w-6 h-6 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold flex items-center justify-center transition cursor-pointer">–</button>
-
-        <!-- Exit game -->
-        <button id="exit-game-btn" title="Exit game" class="w-6 h-6 rounded-full bg-rose-500/80 hover:bg-rose-500 text-white font-bold flex items-center justify-center transition cursor-pointer">×</button>
     </div>
 
     <!-- Tab that brings the menu back after it was hidden -->
-    <button id="hud-tab" title="Show menu (H)" class="hidden fixed bottom-0 left-1/2 -translate-x-1/2 z-[9999] px-4 py-0.5 rounded-t-lg bg-[#1f2937]/90 hover:bg-[#1f2937] text-slate-200 text-[11px] font-semibold border border-b-0 border-slate-600/70 cursor-pointer">▴ Menu</button>
+    <button id="hud-tab" title="Show menu (H)" class="hidden fixed bottom-0 left-3 z-[9999] px-3 py-0.5 rounded-t-lg bg-[#1f2937]/90 hover:bg-[#1f2937] text-slate-200 text-[11px] font-semibold border border-b-0 border-slate-600/70 cursor-pointer">▴ Menu</button>
 
-    <!-- ROOM CHAT (closed by default; open it with the Chat button) -->
-    <div id="chat-panel" class="hidden fixed right-4 bottom-16 z-[10000] w-[320px] max-w-[calc(100vw-2rem)] rounded-2xl bg-[#111827]/95 text-white shadow-2xl border border-slate-600 backdrop-blur-md overflow-hidden">
+    <!-- ROOM CHAT (closed by default; open it from the menu) -->
+    <div id="chat-panel" class="hidden fixed right-3 bottom-3 z-[10000] w-[320px] max-w-[calc(100vw-1.5rem)] rounded-2xl bg-[#111827]/95 text-white shadow-2xl border border-slate-600 backdrop-blur-md overflow-hidden">
         <div class="flex items-center justify-between px-3 py-2 border-b border-slate-700">
             <div>
                 <div class="font-bold text-sm">Room Chat</div>
                 <div id="chat-room-label" class="text-[9px] text-emerald-300 font-mono">TAG · UCAS-1</div>
             </div>
-            <div class="flex items-center gap-2">
-                <span class="flex items-center gap-1 text-[9px] text-emerald-300 font-bold">
-                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>LIVE
-                </span>
-                <button id="chat-close-btn" title="Close chat" class="text-slate-400 hover:text-white font-bold text-base leading-none px-1 cursor-pointer">×</button>
-            </div>
+            <button id="chat-close-btn" title="Close chat" class="text-slate-400 hover:text-white font-bold text-base leading-none px-1 cursor-pointer">×</button>
         </div>
         <div id="chat-messages" class="h-52 overflow-y-auto px-3 py-2 space-y-1.5 text-xs"></div>
         <form id="chat-form" class="flex gap-2 p-2 border-t border-slate-700">
-            <input id="chat-input" maxlength="120" autocomplete="off" placeholder="Trash talk..." class="min-w-0 flex-1 rounded-lg bg-slate-900 border border-slate-600 px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+            <input id="chat-input" maxlength="120" autocomplete="off" placeholder="Say something..." class="min-w-0 flex-1 rounded-lg bg-slate-900 border border-slate-600 px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
             <button type="submit" class="rounded-lg bg-cyan-600 hover:bg-cyan-500 px-3 py-1.5 text-xs font-bold">Send</button>
         </form>
     </div>
 
+    <!-- LEVEL BACKDROP: covers the page while the Platformer is on, because it draws its own level -->
+    <div id="level-backdrop" class="hidden fixed inset-0 z-[9985] bg-slate-800"></div>
+
+    <!-- LEVEL EDITOR (Platformer, developer mode): the layer catches the pointer, the panel is the toolbar -->
+    <div id="editor-layer" class="hidden fixed inset-0 z-[9996] cursor-crosshair" style="touch-action: none"></div>
+    <div id="editor-panel" class="hidden fixed top-3 left-3 z-[10001] w-[270px] max-h-[calc(100vh-1.5rem)] overflow-y-auto p-3 rounded-2xl bg-[#1f2937]/95 text-white shadow-2xl border border-slate-600 backdrop-blur-md text-xs space-y-2.5">
+        <div class="flex items-center justify-between">
+            <span class="font-bold text-slate-100">Level editor</span>
+            <button id="editor-play-btn" title="Test the level from its start point (Esc)" class="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer">Play</button>
+        </div>
+        <div class="grid grid-cols-4 gap-1">
+            <button data-tool="select" title="Pick, move and resize" class="px-1 py-1 rounded bg-blue-600 hover:bg-blue-500 text-[10px] font-semibold cursor-pointer">Select</button>
+            <button data-tool="card" title="Drag out a solid card" class="px-1 py-1 rounded bg-slate-700 hover:bg-slate-600 text-[10px] font-semibold cursor-pointer">Card</button>
+            <button data-tool="ledge" title="Drag out a one-way ledge" class="px-1 py-1 rounded bg-slate-700 hover:bg-slate-600 text-[10px] font-semibold cursor-pointer">Ledge</button>
+            <button data-tool="spring" title="Drag out a spring pad" class="px-1 py-1 rounded bg-slate-700 hover:bg-slate-600 text-[10px] font-semibold cursor-pointer">Spring</button>
+            <button data-tool="flag" title="Place a flag (checkpoints run in the order you place them)" class="px-1 py-1 rounded bg-slate-700 hover:bg-slate-600 text-[10px] font-semibold cursor-pointer">Flag</button>
+            <button data-tool="pickup" title="Place a coin (used by the Overdue game)" class="px-1 py-1 rounded bg-slate-700 hover:bg-slate-600 text-[10px] font-semibold cursor-pointer">Coin</button>
+            <button data-tool="spawn" title="Move the start point" class="px-1 py-1 rounded bg-slate-700 hover:bg-slate-600 text-[10px] font-semibold cursor-pointer">Start</button>
+            <button data-tool="erase" title="Click something to delete it" class="px-1 py-1 rounded bg-slate-700 hover:bg-rose-600 text-[10px] font-semibold cursor-pointer">Erase</button>
+        </div>
+        <div class="flex items-center gap-3 text-[10px] text-slate-300">
+            <label class="flex items-center gap-1">Snap
+                <select id="editor-snap" class="bg-slate-900 text-slate-100 rounded border border-slate-600 px-1 py-0.5 cursor-pointer">
+                    <option value="0">Off</option><option value="5">5</option><option value="10" selected>10</option><option value="20">20</option><option value="40">40</option>
+                </select>
+            </label>
+            <label class="flex items-center gap-1" title="Which dimension new and selected objects belong to">Dimension
+                <select id="editor-dim" class="bg-slate-900 text-slate-100 rounded border border-slate-600 px-1 py-0.5 cursor-pointer">
+                    <option value="both">Both</option><option value="a">A</option><option value="b">B</option>
+                </select>
+            </label>
+        </div>
+        <div class="rounded-lg bg-slate-900/70 p-2 space-y-1.5">
+            <div id="editor-sel-label" class="text-[10px] font-bold text-slate-200">Nothing selected</div>
+            <div class="grid grid-cols-4 gap-1">
+                <label class="text-[9px] text-slate-400">x<input id="ed-x" type="number" step="1" class="w-full bg-slate-800 text-white rounded border border-slate-600 px-1 py-0.5 text-[10px] disabled:opacity-30"></label>
+                <label class="text-[9px] text-slate-400">y<input id="ed-y" type="number" step="1" class="w-full bg-slate-800 text-white rounded border border-slate-600 px-1 py-0.5 text-[10px] disabled:opacity-30"></label>
+                <label class="text-[9px] text-slate-400">w<input id="ed-w" type="number" step="1" class="w-full bg-slate-800 text-white rounded border border-slate-600 px-1 py-0.5 text-[10px] disabled:opacity-30"></label>
+                <label class="text-[9px] text-slate-400">h<input id="ed-h" type="number" step="1" class="w-full bg-slate-800 text-white rounded border border-slate-600 px-1 py-0.5 text-[10px] disabled:opacity-30"></label>
+            </div>
+        </div>
+        <label class="block text-[10px] text-slate-300">Map name
+            <input id="editor-name" maxlength="40" class="mt-0.5 w-full bg-slate-900 text-white rounded border border-slate-600 px-2 py-1 text-[11px]">
+        </label>
+        <div class="grid grid-cols-2 gap-1.5">
+            <button id="editor-save-btn" title="Download the map as a .json file" class="px-2 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 font-bold cursor-pointer">Save file</button>
+            <button id="editor-load-btn" title="Open a .json map file" class="px-2 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 font-bold cursor-pointer">Load file</button>
+            <button id="editor-share-btn" title="Send this map to everyone in the room" class="px-2 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 font-bold cursor-pointer">Share with room</button>
+            <button id="editor-reset-btn" title="Load the first map from the maps folder" class="px-2 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 font-bold cursor-pointer">First map</button>
+            <button id="editor-clear-btn" class="col-span-2 px-2 py-1 rounded-lg bg-slate-700 hover:bg-rose-600 font-bold cursor-pointer">Clear everything</button>
+        </div>
+        <div id="editor-readout" class="font-mono text-[10px] text-slate-400">x, y</div>
+        <p class="text-[10px] text-slate-400 leading-snug">Pick a tool, then click or drag on the level. <b class="text-slate-200">Select</b> moves things and the blue corner resizes them. <b class="text-slate-200">Delete</b> removes the selection. Your work is kept by the browser.</p>
+        <input id="editor-file" type="file" accept=".json,application/json" class="hidden">
+    </div>
+
     <!-- PLAYER CUSTOMIZATION POPOVER -->
-    <div id="customizer-popover" class="hidden fixed bottom-16 left-1/2 -translate-x-1/2 z-[10000] w-[300px] p-3.5 rounded-2xl bg-[#1f2937]/95 text-white shadow-2xl border border-slate-600 backdrop-blur-md text-xs">
+    <div id="customizer-popover" class="hidden fixed bottom-14 left-3 z-[10000] w-[300px] max-w-[calc(100vw-1.5rem)] p-3.5 rounded-2xl bg-[#1f2937]/95 text-white shadow-2xl border border-slate-600 backdrop-blur-md text-xs">
         <div class="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-700">
             <span class="font-bold text-slate-100">Runner Customization</span>
             <button id="close-customizer-btn" class="text-slate-400 hover:text-white font-bold text-sm px-1 cursor-pointer">×</button>
@@ -145,15 +216,11 @@
                 <span class="block text-[11px] text-slate-300 mb-1.5">Runner Color</span>
                 <div id="color-swatch-grid" class="grid grid-cols-5 gap-2"></div>
             </div>
-            <div class="pt-1 border-t border-slate-700/80 text-[10px] text-slate-400 leading-relaxed">
-                <b class="text-slate-200">Moves:</b> <span class="text-blue-300">W/Space</span> Double Jump & Wall-Jump · <span class="text-amber-300">E</span> Swing Hook · <span class="text-emerald-300">Shift / C</span> Dash · <span class="text-rose-300">S</span> Ground Slam · <span class="text-slate-200">H</span> Hide menu
-                <span class="fight-only"><br><b class="text-slate-200">Fight:</b> <span class="text-fuchsia-300">J</span> 3-hit combo · <span class="text-orange-300">Hold K</span> Charged Heavy · <span class="text-cyan-300">L</span> Guard</span>
-            </div>
         </div>
     </div>
 
     <!-- LOBBY BROWSER POPOVER -->
-    <div id="lobby-popover" class="hidden fixed bottom-16 left-1/2 -translate-x-1/2 z-[10000] w-[340px] p-3.5 rounded-2xl bg-[#1f2937]/95 text-white shadow-2xl border border-slate-600 backdrop-blur-md text-xs">
+    <div id="lobby-popover" class="hidden fixed bottom-14 left-3 z-[10000] w-[340px] max-w-[calc(100vw-1.5rem)] p-3.5 rounded-2xl bg-[#1f2937]/95 text-white shadow-2xl border border-slate-600 backdrop-blur-md text-xs">
         <div class="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-700">
             <div class="flex items-center gap-1.5">
                 <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -164,16 +231,18 @@
         <div id="lobby-list" class="max-h-48 overflow-y-auto space-y-1.5 mb-2.5 pr-0.5"></div>
         <div class="pt-2 border-t border-slate-700 flex items-center gap-1.5">
             <input id="new-room-input" type="text" maxlength="12" placeholder="New room name..." class="min-w-0 flex-1 bg-slate-900 text-emerald-300 font-mono uppercase px-2.5 py-1.5 rounded-lg border border-slate-600 focus:outline-none focus:border-emerald-400 text-xs" />
-            <select id="new-room-mode" title="Server type" class="w-[68px] bg-slate-900 text-amber-200 font-bold px-1 py-1.5 rounded-lg border border-slate-600 focus:outline-none cursor-pointer">
+            <select id="new-room-mode" title="Server type" class="w-[78px] bg-slate-900 text-amber-200 font-bold px-1 py-1.5 rounded-lg border border-slate-600 focus:outline-none cursor-pointer">
                 <option value="tag">Tag</option>
-                <option value="fight">Fight</option>
+                <option value="infection" hidden disabled>Infection</option>
+                <option value="freeze" hidden disabled>Freeze Tag</option>
+                <option value="potato" hidden disabled>Hot Potato</option>
                 <option value="platformer" disabled>Platformer, IN PROGRESS</option>
             </select>
             <button id="create-room-btn" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition cursor-pointer">Join</button>
         </div>
     </div>
 
-    <!-- PAGE ROOT: the whole fake Canvas page. The Fight camera zooms/pans this element. -->
+    <!-- PAGE ROOT: the whole fake Canvas page. -->
     <div id="page-root" class="flex flex-col md:flex-row min-h-screen w-full">
 
     <!-- =====================================================================
