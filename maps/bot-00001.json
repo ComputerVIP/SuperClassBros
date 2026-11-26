@@ -1,0 +1,20 @@
+{
+  "format": "super-class-bros-level",
+  "version": 1,
+  "name": "bot-00001",
+  "size": [1440, 810],
+  "spawn": {"x":60,"y":810},
+  "cards": [
+    {"x":1000,"y":260,"w":440,"h":550,"dim":"both"}
+  ],
+  "ledges": [],
+  "springs": [],
+  "boosts": [],
+  "flags": [
+    {"x":1300,"y":260}
+  ],
+  "pickups": [],
+  "texts": [
+    {"x":60,"y":700,"text":"Stack slides (tap S), then slide into the wall","size":18}
+  ]
+}

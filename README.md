@@ -49,7 +49,9 @@ The same room name in two different server types is two different servers. Use *
 | Dash | `Shift`, `C`, `M`, or double-tap left or right (0.25s cooldown in Tag, 0.1s in the Platformer) |
 | Hide / show the menu | `H` |
 | Platformer: slide | Hold `S` while running on the ground |
-| Platformer: slide again (stacking) | `S` once more, between 0.4s and 0.8s into a slide |
+| Platformer: slide again (stacking) | `S` once more, between 0.25s and 0.8s into a slide |
+| Platformer: slide climb | Slide into a wall |
+| Platformer: rope slingshot | Dash while hooked |
 | Platformer: flip dimension | `Tab` |
 | Platformer: next / previous level | `]` / `[` |
 | Platformer: reset this level's best time | `G` twice within 3 seconds |
@@ -81,7 +83,7 @@ The Platformer does not use the page. It plays on its own level, drawn on the sc
 
 - **Every level start and every respawn counts down 2, 1, GO.** You can't move and the clock doesn't run until GO.
 - Every attempt and every level starts in dimension A.
-- Movement: double jump, wall jump, grapple, 8-way dash (hold a direction when you dash, 0.1s cooldown), slide and slide stacking, spring pads, and `Tab` to flip dimensions on levels that have them.
+- Movement: double jump, wall jump, grapple, 8-way dash (hold a direction when you dash, 0.1s cooldown), slide and slide stacking, slide climb, rope slingshot, spring pads, speed boosts, and `Tab` to flip dimensions on levels that have them.
 
 ### Movement details
 
@@ -90,10 +92,13 @@ The Platformer does not use the page. It plays on its own level, drawn on the sc
 | **8-way dash** | Hold a direction (including up or down) when you dash. Dashing cancels a swing. |
 | **Spring pads** | Landing on a spring bounces you. |
 | **Slide** | Hold `S` while running on the floor or a card. You can slide under low gaps. |
-| **Slide stacking** | A slide lasts 0.8s. After 0.4s, press `S` again before it ends and you slide again with more speed (each chained slide keeps 1.25x your speed and adds 130, and every stack raises the speed limit). It stacks up to 6 times, to at most 3.4x the run speed. On the Penguin level a plain slide crosses in 3.6s and stacking in 2.5s. If you jump out of a stacked slide you keep the speed, and it fades gradually. |
+| **Slide stacking** | A slide lasts 0.8s. After 0.25s, press `S` again before it ends and you slide again with more speed (each chained slide keeps 1.25x your speed and adds 130, and every stack raises the speed limit). It stacks up to 6 times, to at most 3.4x the run speed. On the Penguin level, stacking with perfect timing crosses in about 2.05s. If you jump out of a stacked slide you keep the speed, and it fades gradually. |
+| **Slide climb** | Slide into a wall and you run up it. The faster your slide, the faster and higher you climb: about 155 high from a plain slide, 345 at 700 speed and 665 at 1000 (a full stack). Each fresh press of `S` while climbing adds a little climb speed (+20, up to 950); holding it does nothing more, and it never fast-falls you off. Run out of wall and you hop over the top, keeping your upward speed. Every wall works, including no-wall-jump cards and the level's edges. Jump to wall-jump off (on a no-wall-jump card you let go with a normal jump instead), hold away from the wall to let go, or dash or grapple out of it. |
+| **Rope slingshot** | Dash while hooked to snap the rope. You fly on the way you were swinging with 1.2x your swing speed, plus 150, plus a bonus for a long rope (up to 200), plus a little lift. It caps at 1600. Release just past the bottom of a swing for distance, or near the top for height; on the way down it throws you at the ground. Hanging still, it flings you forward and up. It uses the dash cooldown. Only in the Platformer: in Tag a dash still cancels the rope. |
 | **Dimensions** | `Tab` flips which half of the level is solid. Things in the other dimension are ghosted. |
 | **No-wall-jump cards** | Cards with a red border and a red tint. You can't wall slide or wall jump on them, but they are still solid. |
 | **Speed boosts** | Orange zones with moving arrows. You pass through them. Each boost has a speed. When you enter one, and every 0.1 seconds while you stay in it, your speed in its direction is raised to the boost's speed if it is lower. If you are already faster that way, nothing happens. Speed across it is kept, so a long up boost works like a lift. It works while grappling: you stay hooked and the push goes into your swing. After you leave, the extra speed fades out like after a stacked slide. |
+| **Grappling the edges** | The top edge of the level and the side edge you face can be hooked, like a card. A side edge is hooked about 150 above you, so you swing. The hook still prefers what it hits in front of you, and a card along the edge covers it (a no-grapple card there blocks the edge too). |
 | **No-grapple cards** | Cards with a purple border and a purple tint. The hook ignores them and goes for something else (another card, a ledge or the top of the screen). They are still solid. A card that is both has a red border with a half red, half purple top. |
 
 ### Best times and the campaign
@@ -241,6 +246,9 @@ The old version with Fight mode and the follow camera is saved in `fight-version
 | Slide speed, duration and stacking | `SLIDE` in `engine.js` |
 | The map order | `maps/index.json` |
 | Slide stacking strength | `SLIDE_STACK_MUL`, `SLIDE_STACK_ADD`, `SLIDE_CAP_STEP`, `SLIDE_CAP_MAX` in `DEFAULTS` |
+| Slide stacking timing | `SLIDE.COOLDOWN` (0.25s) and `SLIDE.DURATION` (0.8s) in `engine.js` |
+| Slide climb height and speed | `CLIMB` in `engine.js` |
+| Rope slingshot strength | `SLING` in `engine.js` |
 | Platformer countdown length | `COUNTDOWN` in `engine.js` |
 | How long the bot freezes after tagging you | `BOT_PAUSE` in `engine.js` |
 | Overdue: grace period, how far a dot pushes the floor, how fast it rises, the speed at each difficulty | `OVERDUE_GRACE`, `OVERDUE_PUSH`, `overdueSpeed`, `OVERDUE_SPEED` in `engine.js` |

@@ -169,6 +169,7 @@ export function makeRunner(id, over = {}) {
         frozen: false, frozenAt: 0, out: false, ghost: false,
         walkCycle: 0, dashTimer: 0, dashCooldown: 0, dashDir: 1, dashX: 1, dashY: null, dashCharges: 1, pauseTimer: 0,
         sliding: false, slideTime: 0, slideAge: 0, slideStack: 0, prevDown: false, speedScale: 1,
+        climbTime: 0, climbVy: 0, climbDir: 0,
         fly: false, infJumps: false,
         grapple: { active: false, ax: 0, ay: 0, length: 0, limit: 0 },
         ...over,
@@ -516,7 +517,7 @@ function moveAndCollide(r, dt) {
 const standClear = (r) => !G.solids.some((s) => overlaps({ x: r.x, y: r.y - (STAND_H - SLIDE_H), w: r.w, h: STAND_H }, s));
 
 /** Slide tuning. A slide lasts DURATION seconds. After COOLDOWN seconds you can click S again for a faster slide. */
-const SLIDE = { DURATION: 0.8, COOLDOWN: 0.4, BOOST: 160, CAP: 1.5, MAX_STACK: 6, FRICTION: 0.99 };
+const SLIDE = { DURATION: 0.8, COOLDOWN: 0.25, BOOST: 160, CAP: 1.5, MAX_STACK: 6, FRICTION: 0.99 };
 
 /** Start a slide, or (chain) start the next one from inside a slide for a bit more speed. */
 function startSlide(r, chain) {
@@ -534,6 +535,33 @@ function startSlide(r, chain) {
     spawnParticles(r.x + r.w / 2, r.y + r.h, chain ? '#fbbf24' : '#cbd5e1', chain ? 10 : 6);
 }
 
+/** Slide climb (Platformer): sliding into a wall runs you up it. More slide speed climbs faster and higher. It works
+ *  on every wall, no-wall-jump cards included. While climbing, each press of S adds a little climb speed. */
+export const CLIMB = { MIN_SPEED: 150, SPEED: 0.8, TIME_MIN: 0.2, TIME_PER_SPEED: 1 / 2500, TIME_MAX: 0.65, KEEP: 0.5, LEDGE_POP: 170, PRESS_ADD: 20, MAX_SPEED: 950 };
+/** Is there a wall right against this side (dir -1 / 1)? Any card counts, no-wall-jump ones too, and the level's edges. */
+function wallAt(r, dir) {
+    if (dir < 0 ? r.x <= 2.5 : r.x + r.w >= view.w - 2.5) return true;
+    return G.solids.some((s) => r.y + r.h > s.y + 4 && r.y < s.y + s.h - 4 && (dir > 0 ? Math.abs(r.x + r.w - s.x) <= 1.5 : Math.abs(r.x - (s.x + s.w)) <= 1.5));
+}
+function startClimb(r, speed, dir) {
+    if (!standClear(r)) return; // no room to stand up against this wall
+    endSlide(r);
+    r.climbDir = dir;
+    r.climbVy = speed * CLIMB.SPEED;
+    r.climbTime = Math.min(CLIMB.TIME_MAX, CLIMB.TIME_MIN + speed * CLIMB.TIME_PER_SPEED);
+    r.vy = -r.climbVy;
+    r.grounded = false;
+    r.coyoteTimer = 0;
+    r.facing = dir;
+    spawnParticles(r.x + (dir > 0 ? r.w : 0), r.y + r.h, '#fbbf24', 10);
+}
+/** Stop climbing. Off the top of the wall you get a small hop over the edge; otherwise you keep some of the climb. */
+function endClimb(r, overTop = false) {
+    if (r.climbTime <= 0) return;
+    r.climbTime = 0;
+    r.vy = Math.min(r.vy, -r.climbVy * CLIMB.KEEP);
+    if (overTop) r.vx = r.climbDir * CLIMB.LEDGE_POP;
+}
 function endSlide(r) {
     r.sliding = false;
     r.slideStack = 0;
@@ -548,7 +576,8 @@ export function triggerDash(r, dir, vec = null) {
     const charges = pfOn() && PF.dashMode === 'charges';
     if (charges ? r.dashCharges <= 0 : r.dashCooldown > 0) return;
     if (charges) r.dashCharges--; else r.dashCooldown = isPlatformer() ? T.DASH_COOLDOWN_PF : T.DASH_COOLDOWN;
-
+    if (r.grapple.active && pfOn()) { slingshot(r); return; } // Platformer: dashing on a rope snaps it and flings you
+    r.climbTime = 0;
     r.grapple.active = false;
     r.fastFalling = false;
     const face = dir || r.facing || 1;
@@ -569,8 +598,30 @@ export function triggerDash(r, dir, vec = null) {
     spawnParticles(r.x + r.w / 2, r.y + r.h / 2, r.scarfColor, 10);
 }
 
+/** Rope slingshot (Platformer): dash while hooked to snap the rope. You fly on the way you were swinging, with
+ *  your swing speed times SLING.MUL plus a bonus for a long rope, and a little lift. Release just past the
+ *  bottom of a swing for distance, near the top for height (on the way down it throws you at the ground). Swinging too slowly to go anywhere flings you the way you face, slightly up. */
+export const SLING = { MUL: 1.2, ADD: 150, LIFT: 150, ROPE_BONUS: 0.6, ROPE_BONUS_MAX: 200, MIN_SPEED: 120, MAX: 1600 };
+function slingshot(r) {
+    const g = r.grapple;
+    g.active = false;
+    let speed = Math.hypot(r.vx, r.vy);
+    let dx, dy;
+    if (speed < SLING.MIN_SPEED) { dx = r.facing * 0.8; dy = -0.6; speed = SLING.MIN_SPEED; }
+    else { dx = r.vx / speed; dy = r.vy / speed; }
+    const out = Math.min(SLING.MAX, speed * SLING.MUL + SLING.ADD + Math.min(SLING.ROPE_BONUS_MAX, g.length * SLING.ROPE_BONUS));
+    r.vx = dx * out;
+    r.vy = dy * out - SLING.LIFT; // a little lift, like a jump release, so a flat fling does not just drop
+    r.fastFalling = false;
+    r.jumpsLeft = Math.max(r.jumpsLeft, 1);
+    if (dx) r.facing = Math.sign(dx);
+    spawnParticles(g.ax, g.ay, '#fbbf24', 8);
+    spawnParticles(r.x + r.w / 2, r.y + r.h / 2, '#f59e0b', 14);
+    for (let i = 0; i < 3; i++) addAfterimage(r);
+}
 export function handleJump(r) {
     if (r.frozen) return;
+    if (r.climbTime > 0 && r.wallSide === 0) endClimb(r); // climbing a no-wall-jump card: let go, then a normal (double) jump
     // Sliding: stand up first (and carry the speed into the jump).
     if (r.sliding) {
         if (!standClear(r)) return;
@@ -599,8 +650,9 @@ export function handleJump(r) {
         spawnParticles(r.x + r.w / 2, r.y + r.h, '#94a3b8', 6);
         return;
     }
-    // 3. Wall-jump
+    // 3. Wall-jump (also how you jump off a slide climb)
     if (r.wallSide !== 0) {
+        r.climbTime = 0;
         r.vx = -r.wallSide * T.WALL_JUMP_VX;
         r.vy = T.WALL_JUMP_VY;
         r.facing = -r.wallSide;
@@ -623,7 +675,7 @@ export function handleJump(r) {
 
 /** Mid-air S / Down: dive straight down. */
 export function fastFall(r) {
-    if (r.grounded || r.grapple.active || r.vy <= -180 || r.frozen) return;
+    if (r.grounded || r.grapple.active || r.vy <= -180 || r.frozen || r.climbTime > 0) return; // while climbing, S only adds climb speed
     r.fastFalling = true;
     r.vy = Math.max(r.vy, FAST_FALL_SPEED);
     spawnParticles(r.x + r.w / 2, r.y, r.scarfColor, 6);
@@ -658,6 +710,7 @@ export function stepRunner(r, dt, rawInput) {
         if (r[k] > 0) r[k] -= dt;
     }
     if (r.fly) { flyStep(r, dt, input); return; }
+    if (r.climbTime > 0 && (r.dashTimer > 0 || r.grapple.active || r.frozen || (r.climbDir > 0 ? left : right))) endClimb(r); // dash, hook or pull away
 
     // Drop through a one-way ledge (never through solid cards or the floor)
     if (down && r.grounded && !r.grapple.active && !r.sliding && supportOf(r) === 'ledge') {
@@ -688,7 +741,17 @@ export function stepRunner(r, dt, rawInput) {
     } else if (r.sliding) endSlide(r);
 
     // Horizontal control
-    if (r.dashTimer > 0) {
+    if (r.climbTime > 0) { // running up a wall after sliding into it: stay pressed against it
+        r.climbTime -= dt;
+        if (pressed) { // S while climbing: a little more climb speed, nothing else
+            r.climbVy = Math.min(CLIMB.MAX_SPEED, r.climbVy + CLIMB.PRESS_ADD);
+            spawnParticles(r.x + (r.climbDir > 0 ? r.w : 0), r.y + r.h, '#fbbf24', 4);
+        }
+        r.vx = r.climbDir * 60;
+        r.vy = -r.climbVy;
+        if (Math.random() < 0.5) spawnParticles(r.x + (r.climbDir > 0 ? r.w : 0), r.y + r.h * 0.8, '#cbd5e1', 1);
+        if (r.climbTime <= 0) { r.climbTime = 0.0001; endClimb(r); }
+    } else if (r.dashTimer > 0) {
         r.dashTimer -= dt;
         r.vx = r.dashX * T.DASH_SPEED;
         if (r.dashY !== null) r.vy = r.dashY * T.DASH_SPEED;
@@ -724,7 +787,7 @@ export function stepRunner(r, dt, rawInput) {
     }
 
     // Gravity (lighter near the jump apex)
-    if (r.dashTimer <= 0) {
+    if (r.dashTimer <= 0 && r.climbTime <= 0) {
         const apex = !r.grounded && !r.grapple.active && Math.abs(r.vy) < 95 ? 0.68 : 1;
         r.vy += T.GRAVITY * apex * dt;
     }
@@ -736,7 +799,14 @@ export function stepRunner(r, dt, rawInput) {
     }
 
     const wasGrounded = r.grounded;
+    const slideSpeed = r.sliding ? Math.abs(r.vx) : 0; // for the slide climb: how fast we hit a wall
+    const slideDir = Math.sign(r.vx);
     moveAndCollide(r, dt);
+    if (pfOn() && slideSpeed > CLIMB.MIN_SPEED && slideDir && Math.abs(r.vx) < 1 && wallAt(r, slideDir)) startClimb(r, slideSpeed, slideDir);
+    if (r.climbTime > 0) {
+        if (!wallAt(r, r.climbDir)) endClimb(r, true); // ran out of wall: hop over the top
+        else if (r.vy > -1) endClimb(r);                  // bumped a ceiling
+    }
 
     // One dash charge comes back whenever you touch ground, a wall, or hang from a hook.
     if (r.grounded || r.wallSide !== 0 || r.grapple.active) r.dashCharges = 1;
@@ -805,6 +875,9 @@ function attachHook(r, x, y, dist) {
 
 /** Fire the hook diagonally (or straight up). It always locks onto a card: first whatever the aim hits,
  *  then a nearby ledge corner, then simply the nearest card at any distance. Toggles off if already hooked. */
+/** The edges of the level as grapple anchors (Platformer). The aimed ray already stops at them; this adds them to the
+ *  "nearest anchor" fallback. SIDE_UP: how far above you a side edge is hooked. */
+export const GRAPPLE_EDGES = { on: true, SIDE_UP: 150 };
 export function toggleGrapple(r, straightUp = false) {
     if (r.grapple.active) { r.grapple.active = false; return; }
     if (r.frozen) return;
@@ -855,12 +928,16 @@ export function toggleGrapple(r, straightUp = false) {
         }
     }
 
-    // 3. Still nothing: lock onto the nearest card anyway, at any distance.
+    // 3. Still nothing: lock onto the nearest card anyway, at any distance. In the Platformer the top and side
+    //    edge and the side edge you face count too (a side edge is hooked a little above you, so you swing).
     if (hitX === null) {
         let nearest = Infinity;
-        for (const p of cards.length ? cards : anchors) {
-            const px = clamp(ox, p.x + 4, p.x + p.w - 4);
-            const py = clamp(oy - 20, p.y + 2, p.y + p.h);
+        const pts = (cards.length ? cards : anchors).map((p) => [clamp(ox, p.x + 4, p.x + p.w - 4), clamp(oy - 20, p.y + 2, p.y + p.h)]);
+        if (GRAPPLE_EDGES.on && pfOn()) { // ...but not where a card covers the edge (that would hook through it)
+            const edges = [[clamp(ox, 3, view.w - 3), 3], [r.facing < 0 ? 3 : view.w - 3, Math.max(3, oy - GRAPPLE_EDGES.SIDE_UP)]];
+            for (const [ex, ey] of edges) if (!G.solids.some((s) => ex >= s.x - 4 && ex <= s.x + s.w + 4 && ey >= s.y - 4 && ey <= s.y + s.h + 4)) pts.push([ex, ey]);
+        }
+        for (const [px, py] of pts) {
             const dist = Math.hypot(px - ox, py - oy);
             if (dist > 24 && dist < nearest) { nearest = dist; bestDist = dist; hitX = px; hitY = py; }
         }

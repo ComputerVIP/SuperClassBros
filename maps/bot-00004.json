@@ -1,0 +1,22 @@
+{
+  "format": "super-class-bros-level",
+  "version": 1,
+  "name": "bot-00004",
+  "size": [1440, 810],
+  "spawn": {"x":620,"y":810},
+  "cards": [
+    {"x":500,"y":150,"w":60,"h":660,"dim":"both","noGrapple":true},
+    {"x":680,"y":300,"w":120,"h":510,"dim":"both","noGrapple":true},
+    {"x":440,"y":0,"w":400,"h":30,"dim":"both","noGrapple":true}
+  ],
+  "ledges": [],
+  "springs": [],
+  "boosts": [],
+  "flags": [
+    {"x":750,"y":300}
+  ],
+  "pickups": [],
+  "texts": [
+    {"x":760,"y":700,"text":"No hooks here: wall jump up the gap","size":18}
+  ]
+}

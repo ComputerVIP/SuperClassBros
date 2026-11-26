@@ -1,0 +1,22 @@
+{
+  "format": "super-class-bros-level",
+  "version": 1,
+  "name": "Roundabout",
+  "size": [1440, 810],
+  "spawn": {"x":710,"y":210},
+  "cards": [
+    {"x":610,"y":280,"w":200,"h":200,"dim":"both"}
+  ],
+  "ledges": [],
+  "springs": [],
+  "boosts": [],
+  "flags": [
+    {"x":710,"y":280},
+    {"x":820,"y":400},
+    {"x":710,"y":520},
+    {"x":590,"y":400},
+    {"x":690,"y":280}
+  ],
+  "pickups": [],
+  "texts": []
+}

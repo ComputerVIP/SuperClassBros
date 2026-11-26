@@ -1,0 +1,24 @@
+{
+  "format": "super-class-bros-level",
+  "version": 1,
+  "name": "bot-00003",
+  "size": [1440, 810],
+  "spawn": {"x":60,"y":810},
+  "cards": [
+    {"x":800,"y":0,"w":40,"h":600,"dim":"a"},
+    {"x":1100,"y":420,"w":340,"h":40,"dim":"both"}
+  ],
+  "ledges": [],
+  "springs": [],
+  "boosts": [
+    {"x":300,"y":170,"w":140,"h":640,"dim":"both","dir":90,"power":750},
+    {"x":300,"y":40,"w":300,"h":130,"dim":"both","dir":0,"power":950}
+  ],
+  "flags": [
+    {"x":1300,"y":420}
+  ],
+  "pickups": [],
+  "texts": [
+    {"x":40,"y":740,"text":"Ride the lift, then Tab through the blue wall","size":18}
+  ]
+}

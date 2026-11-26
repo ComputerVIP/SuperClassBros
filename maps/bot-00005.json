@@ -1,0 +1,28 @@
+{
+  "format": "super-class-bros-level",
+  "version": 1,
+  "name": "bot-00005",
+  "size": [1440, 810],
+  "spawn": {"x":40,"y":810},
+  "cards": [
+    {"x":560,"y":420,"w":160,"h":390,"dim":"both"},
+    {"x":860,"y":180,"w":140,"h":30,"dim":"both","noWallJump":true},
+    {"x":1080,"y":360,"w":180,"h":40,"dim":"both"},
+    {"x":1060,"y":140,"w":200,"h":30,"dim":"both"}
+  ],
+  "ledges": [],
+  "springs": [],
+  "boosts": [
+    {"x":1290,"y":170,"w":140,"h":640,"dim":"both","dir":90,"power":750},
+    {"x":1290,"y":40,"w":140,"h":130,"dim":"both","dir":180,"power":700}
+  ],
+  "flags": [
+    {"x":640,"y":420},
+    {"x":1170,"y":360},
+    {"x":1120,"y":140}
+  ],
+  "pickups": [],
+  "texts": [
+    {"x":40,"y":700,"text":"Climb, swing, ride: flags in order","size":18}
+  ]
+}
